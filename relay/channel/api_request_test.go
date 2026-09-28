@@ -2,11 +2,17 @@ package channel
 
 import (
 	"context"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -215,5 +221,175 @@ func TestToWebSocketURL(t *testing.T) {
 		"ws://127.0.0.1:3000/backend-api/codex/responses": "ws://127.0.0.1:3000/backend-api/codex/responses",
 	} {
 		assert.Equal(t, want, toWebSocketURL(input), input)
+	}
+}
+
+// hangBody blocks on Read until Close is called, simulating an upstream that
+// returns headers but never sends the first body byte.
+type hangBody struct {
+	release chan struct{}
+	once    sync.Once
+}
+
+func (h *hangBody) Read([]byte) (int, error) {
+	<-h.release
+	return 0, io.EOF
+}
+
+func (h *hangBody) Close() error {
+	h.once.Do(func() { close(h.release) })
+	return nil
+}
+
+func TestAwaitFirstByteReturnsFirstByteAndPreservesStream(t *testing.T) {
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader("hello"))}
+	require.NoError(t, awaitFirstByte(resp, time.Second))
+
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(got))
+}
+
+func TestAwaitFirstByteEmptyBodyIsNotTimeout(t *testing.T) {
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(""))}
+	require.NoError(t, awaitFirstByte(resp, time.Second))
+}
+
+func TestAwaitFirstByteTimesOutAndClosesBody(t *testing.T) {
+	body := &hangBody{release: make(chan struct{})}
+	resp := &http.Response{Body: body}
+
+	err := awaitFirstByte(resp, 20*time.Millisecond)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "first response byte not received")
+
+	select {
+	case <-body.release:
+	default:
+		t.Fatal("body was not closed on timeout")
+	}
+}
+
+// An auth service (e.g. chat2api) can answer a request with a 401 challenge
+// before the eventual 200. The first-byte guard must treat the 401 as the
+// response of this attempt (not hang waiting for a later 200) and keep its
+// body intact.
+func TestAwaitFirstByteErrorResponsePreservesBody(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusUnauthorized,
+		Body:       io.NopCloser(strings.NewReader(`{"error":"unauthorized"}`)),
+	}
+	require.NoError(t, awaitFirstByte(resp, time.Second))
+
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, `{"error":"unauthorized"}`, string(got))
+}
+
+// A quick 401 challenge satisfies the transport's ResponseHeaderTimeout and the
+// first-byte guard alike; neither should falsely fire on the 401.
+func TestResponseHeaderTimeoutSatisfiedByQuick401(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="chat2api"`)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer upstream.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{ResponseHeaderTimeout: 50 * time.Millisecond},
+	}
+	req, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader(`{"model":"m"}`))
+	require.NoError(t, err)
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	require.NoError(t, awaitFirstByte(resp, 50*time.Millisecond))
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, `{"error":"unauthorized"}`, string(got))
+}
+
+// TestAwaitFirstByteNilBodyIsNotTimeout guards against a response whose Body is
+// nil (e.g. HEAD-style or a 401 with no body); the guard must return immediately.
+func TestAwaitFirstByteNilBodyIsNotTimeout(t *testing.T) {
+	resp := &http.Response{StatusCode: http.StatusUnauthorized, Body: http.NoBody}
+	require.NoError(t, awaitFirstByte(resp, time.Second))
+}
+
+// TestResolveFirstResponseTimeoutGatesOnStreaming verifies the first-byte timeout
+// is a streaming-only concept: a non-streaming request must never arm it, even
+// when a per-model threshold is configured and prompt tokens are known.
+func TestResolveFirstResponseTimeoutGatesOnStreaming(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	threshold := kitdto.ChannelSettings{
+		ModelFirstResponseTimeout: map[string][]kitdto.FirstResponseTimeoutTier{
+			"gpt-4": {{ContextTokens: 4096, TimeoutMs: 5000}},
+		},
+	}
+	newInfo := func(isStream bool, meta *relaycommon.ChannelMeta) *relaycommon.RelayInfo {
+		info := &relaycommon.RelayInfo{IsStream: isStream, OriginModelName: "gpt-4", TokenGroup: "default"}
+		if meta != nil {
+			info.ChannelMeta = meta
+		}
+		info.SetEstimatePromptTokens(1000)
+		return info
+	}
+
+	// Non-streaming never arms the timeout, even with a configured threshold and
+	// known prompt tokens.
+	require.Zero(t, resolveFirstResponseTimeout(c, newInfo(false, &relaycommon.ChannelMeta{ChannelSetting: threshold})))
+
+	// Streaming without channel meta → 0.
+	require.Zero(t, resolveFirstResponseTimeout(c, newInfo(true, nil)))
+
+	// Streaming without a threshold for the model → 0.
+	require.Zero(t, resolveFirstResponseTimeout(c, newInfo(true, &relaycommon.ChannelMeta{})))
+}
+
+// TestUpstream401Then200OnSameConnection documents what actually happens when an
+// auth service writes a 401 and then a 200 for the same request. Go's HTTP/1.1
+// client returns the FIRST response (401); the trailing 200 bytes stay buffered
+// for the next request on the keep-alive connection. The first-byte guard reads
+// the 401's (empty) body and never hangs waiting for the 200.
+func TestUpstream401Then200OnSameConnection(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 4096)
+		_, _ = conn.Read(buf) // drain the request line + headers
+		_, _ = conn.Write([]byte("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"))
+		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello"))
+	}()
+
+	client := &http.Client{
+		Transport: &http.Transport{ResponseHeaderTimeout: time.Second},
+	}
+	req, err := http.NewRequest(http.MethodPost, "http://"+listener.Addr().String(), strings.NewReader(`{"model":"m"}`))
+	require.NoError(t, err)
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	require.NoError(t, awaitFirstByte(resp, time.Second))
+	select {
+	case <-serverDone:
+	case <-time.After(time.Second):
+		t.Fatal("server goroutine did not finish")
 	}
 }

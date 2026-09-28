@@ -1260,11 +1260,22 @@ func TopUp(c *gin.Context) {
 		logger.LogError(c, fmt.Sprintf("failed to redeem key %s for user %d: %s", req.Key, id, err.Error()))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"success": true,
 		"message": "",
 		"data":    quota,
-	})
+	}
+	// Attach the optional, admin-configured success dialog. The credited amount
+	// stays in `data` as a number so existing callers keep working when the
+	// dialog is disabled.
+	if dialog := model.CurrentRedemptionDialog(); dialog.Config.Enabled {
+		response["success_dialog"] = gin.H{
+			"title":             dialog.Config.Title,
+			"content":           dialog.Config.Content,
+			"close_button_text": dialog.Config.CloseButtonText,
+		}
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 type UpdateUserSettingRequest struct {

@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -517,8 +518,29 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 	return http.ErrUseLastResponse
 }
 
+// resolveFirstResponseTimeout returns the per-model first-byte timeout to arm for
+// this attempt, or 0 when it should not apply. It is a streaming (time-to-first-
+// token) concept: a non-streaming response is generated in full before the
+// upstream sends it, so its "first byte" is really the whole response and must
+// stay under the global timeouts. It also only arms when a retry to a different
+// channel would actually happen (see service.WouldRetryFirstByteTimeout).
+func resolveFirstResponseTimeout(c *gin.Context, info *common.RelayInfo) time.Duration {
+	if info == nil || info.ChannelMeta == nil || !info.IsStream {
+		return 0
+	}
+	ms := info.ChannelSetting.ResolveFirstResponseTimeout(info.OriginModelName, info.GetEstimatePromptTokens())
+	if ms <= 0 {
+		return 0
+	}
+	if !service.WouldRetryFirstByteTimeout(c, info.TokenGroup, info.OriginModelName, info.RetryIndex) {
+		return 0
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
-	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
+	responseHeaderTimeout := resolveFirstResponseTimeout(c, info)
+	client, err := service.GetHttpClientWithProxyTimeout(info.ChannelSetting.Proxy, info.ChannelSetting, responseHeaderTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
 	}
@@ -583,9 +605,70 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 
+	// 首字超时需覆盖「响应头返回后、首个内容字节到达前」这一阶段。ResponseHeaderTimeout
+	// 只能卡响应头；此处同步等待首个 body 字节，超时即判定失败（触发重试），首个字节
+	// 到达后解除计时，后续流式读取不再受该超时约束。
+	if responseHeaderTimeout > 0 {
+		if err := awaitFirstByte(resp, responseHeaderTimeout); err != nil {
+			_ = resp.Body.Close()
+			logger.LogError(c, "first response timeout: "+err.Error())
+			return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: first response timeout"))
+		}
+	}
+
 	_ = req.Body.Close()
 	_ = c.Request.Body.Close()
 	return resp, nil
+}
+
+// awaitFirstByte waits synchronously for the first content byte of an upstream
+// response body within the given timeout, so a per-model first-response (TTFB)
+// timeout also covers upstreams that return headers immediately but then stall
+// before the first body byte. Once the first byte arrives the body is re-wrapped
+// unchanged and streaming is no longer bounded by this timeout. On timeout the
+// body is closed to unblock the reader goroutine.
+func awaitFirstByte(resp *http.Response, timeout time.Duration) error {
+	type readResult struct {
+		n   int
+		err error
+	}
+	buf := make([]byte, 1)
+	result := make(chan readResult, 1)
+	go func() {
+		n, err := resp.Body.Read(buf)
+		result <- readResult{n: n, err: err}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case r := <-result:
+		if r.n > 0 {
+			resp.Body = &prefixedReadCloser{
+				Reader: io.MultiReader(bytes.NewReader(buf[:r.n]), resp.Body),
+				closer: resp.Body,
+			}
+		}
+		return nil
+	case <-timer.C:
+		_ = resp.Body.Close()
+		return fmt.Errorf("first response byte not received within %s", timeout)
+	}
+}
+
+// prefixedReadCloser prepends already-read bytes to an upstream response body so
+// the first content byte consumed by awaitFirstByte is not lost to the caller.
+type prefixedReadCloser struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (p *prefixedReadCloser) Close() error {
+	if p.closer == nil {
+		return nil
+	}
+	return p.closer.Close()
 }
 
 func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {

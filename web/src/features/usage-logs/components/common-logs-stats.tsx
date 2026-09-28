@@ -86,6 +86,12 @@ export function CommonLogsStats() {
     )
   }
 
+  const promptTokens = stats?.prompt_tokens || 0
+  const cacheTokens = stats?.cache_tokens || 0
+  // 口径：缓存读取命中的输入 token 占总输入 token 的比例；分母为 0 时按 0 展示。
+  const cacheHitRate =
+    promptTokens > 0 ? (cacheTokens / promptTokens) * 100 : 0
+
   return (
     <div className='flex flex-wrap items-center gap-2'>
       <StatBadge
@@ -102,6 +108,11 @@ export function CommonLogsStats() {
         label={t('TPM')}
         value={stats?.tpm || 0}
         accent='bg-slate-400/70'
+      />
+      <StatBadge
+        label={t('Cache Hit Rate')}
+        value={`${cacheHitRate.toFixed(4)}%`}
+        accent='bg-amber-500/70'
       />
     </div>
   )

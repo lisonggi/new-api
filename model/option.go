@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"maps"
 	"strconv"
 	"strings"
@@ -11,9 +12,11 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/error_mapping"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/setting/redemption_dialog"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"gorm.io/gorm"
 )
@@ -185,6 +188,14 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
 	common.OptionMap["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
 	common.OptionMap["ExposeRatioEnabled"] = strconv.FormatBool(ratio_setting.IsExposeRatioEnabled())
+	// The whole error-message-mapping document is owned by
+	// loadErrorMessageMapping; seed the disabled default so GetOptions always
+	// exposes the key before the first load.
+	common.OptionMap[error_mapping.OptionKey] = error_mapping.DefaultJSON()
+	// The whole redemption-success-dialog document is owned by
+	// loadRedemptionDialog; seed the disabled default so GetOptions always
+	// exposes the key before the first load.
+	common.OptionMap[redemption_dialog.OptionKey] = redemption_dialog.DefaultJSON()
 
 	// 自动添加所有注册的模型配置
 	modelConfigs := config.GlobalConfig.ExportAllConfigs()
@@ -195,6 +206,15 @@ func InitOptionMap() {
 }
 
 func loadOptionsFromDatabase() {
+	// Load this feature before taking the other option mutexes so its publish
+	// never nests with requestPolicyOptionMutex/passkeyOptionMutex and so a
+	// stale AllOption read cannot overwrite a just-saved value.
+	if err := loadErrorMessageMapping(); err != nil {
+		common.SysError("failed to load error message mapping: " + err.Error())
+	}
+	if err := loadRedemptionDialog(); err != nil {
+		common.SysError("failed to load redemption success dialog: " + err.Error())
+	}
 	requestPolicyOptionMutex.Lock()
 	defer requestPolicyOptionMutex.Unlock()
 	defer func() {
@@ -207,6 +227,16 @@ func loadOptionsFromDatabase() {
 	options, _ := AllOption()
 	passkeyOptions := make(map[string]string)
 	for _, option := range options {
+		if option.Key == error_mapping.OptionKey {
+			// Owned by loadErrorMessageMapping above; never republish from this
+			// possibly-stale bulk read.
+			continue
+		}
+		if option.Key == redemption_dialog.OptionKey {
+			// Owned by loadRedemptionDialog above; never republish from this
+			// possibly-stale bulk read.
+			continue
+		}
 		if IsPasskeyDomainOption(option.Key) {
 			passkeyOptions[option.Key] = option.Value
 			continue
@@ -244,6 +274,22 @@ func validateOptionValue(key string, value string) error {
 }
 
 func UpdateOption(key string, value string) error {
+	if key == error_mapping.OptionKey {
+		cfg, err := error_mapping.ParseConfig([]byte(value))
+		if err != nil {
+			return err
+		}
+		_, err = SaveErrorMessageMapping(cfg)
+		return err
+	}
+	if key == redemption_dialog.OptionKey {
+		cfg, err := redemption_dialog.ParseConfig([]byte(value))
+		if err != nil {
+			return err
+		}
+		_, err = SaveRedemptionDialog(cfg)
+		return err
+	}
 	if IsRequestPolicyOption(key) {
 		return UpdateRequestPolicyOptions(map[string]string{key: value})
 	}
@@ -280,6 +326,12 @@ func UpdateOption(key string, value string) error {
 func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
+	}
+	if _, ok := values[error_mapping.OptionKey]; ok {
+		return errors.New("error message mapping must be saved through the dedicated settings endpoint")
+	}
+	if _, ok := values[redemption_dialog.OptionKey]; ok {
+		return errors.New("redemption success dialog must be saved through the dedicated settings endpoint")
 	}
 	for key := range values {
 		if IsPasskeyDomainOption(key) {
@@ -340,6 +392,16 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if key == error_mapping.OptionKey {
+		// Owned by SaveErrorMessageMapping/loadErrorMessageMapping, which publish
+		// the option value and snapshot together under their own mutex.
+		return nil
+	}
+	if key == redemption_dialog.OptionKey {
+		// Owned by SaveRedemptionDialog/loadRedemptionDialog, which publish the
+		// option value and snapshot together under their own mutex.
+		return nil
+	}
 	if key == retiredThemeOptionKey {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)

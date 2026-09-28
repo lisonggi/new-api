@@ -41,6 +41,12 @@ func (info *RelayInfo) ObserveResponseModel(model string) {
 	if info == nil || strings.TrimSpace(model) == "" {
 		return
 	}
+	// A channel that opted out of the mismatch warning never records the
+	// observation, so the log row stays clean regardless of what the upstream
+	// declares (for example when the upstream model name is a routing ID).
+	if info.ChannelMeta != nil && info.ChannelMeta.ChannelSetting.IgnoreResponseModelMismatch {
+		return
+	}
 	if info.ResponseModel == nil {
 		info.ResponseModel = &ResponseModel{
 			RequestedModel: info.OriginModelName,

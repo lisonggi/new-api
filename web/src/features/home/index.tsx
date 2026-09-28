@@ -16,17 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Link } from '@tanstack/react-router'
 import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
+import { Button } from '@/components/ui/button'
 import { useTheme } from '@/context/theme-provider'
+import { useSystemConfig } from '@/hooks/use-system-config'
 import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { CTA, Features, Hero, HowItWorks, Stats } from './components'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
@@ -35,6 +37,7 @@ export function Home() {
   const { resolvedTheme } = useTheme()
   const { auth } = useAuthStore()
   const isAuthenticated = !!auth.user
+  const { systemName, logo } = useSystemConfig()
   const { content, isLoaded, isUrl } = useHomePageContent()
 
   const syncIframePreferences = useCallback(() => {
@@ -122,11 +125,45 @@ export function Home() {
 
   return (
     <PublicLayout showMainContainer={false}>
-      <Hero isAuthenticated={isAuthenticated} />
-      <Stats />
-      <Features />
-      <HowItWorks />
-      <CTA isAuthenticated={isAuthenticated} />
+      <main className='flex min-h-svh flex-col items-center justify-center px-6 text-center'>
+        <img
+          src={logo}
+          alt={systemName}
+          className='size-24 rounded-3xl object-contain shadow-sm'
+        />
+        <h1 className='mt-6 text-3xl font-bold tracking-tight md:text-4xl'>
+          {systemName}
+        </h1>
+        <p className='text-muted-foreground mt-3 text-base md:text-lg'>
+          {t('Ultra-fast relay, one step ahead')}
+        </p>
+        <div className='mt-8 flex flex-wrap items-center justify-center gap-3'>
+          {isAuthenticated ? (
+            <Button
+              className='h-11 rounded-lg px-5 text-sm font-medium'
+              render={<Link to='/dashboard' />}
+            >
+              {t('Go to Dashboard')}
+            </Button>
+          ) : (
+            <>
+              <Button
+                className='h-11 rounded-lg px-5 text-sm font-medium'
+                render={<Link to='/sign-in' />}
+              >
+                {t('Sign in')}
+              </Button>
+              <Button
+                variant='outline'
+                className='border-border/50 hover:border-border hover:bg-muted/50 h-11 rounded-lg px-5 text-sm font-medium'
+                render={<Link to='/sign-up' />}
+              >
+                {t('Sign up')}
+              </Button>
+            </>
+          )}
+        </div>
+      </main>
       <Footer />
     </PublicLayout>
   )

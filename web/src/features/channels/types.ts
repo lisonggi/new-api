@@ -84,6 +84,12 @@ export interface ChannelSettings {
   task_extend_plugin_keys?: string[]
   force_format?: boolean
   thinking_to_content?: boolean
+  reasoning_content_backfill?: boolean
+  ignore_response_model_mismatch?: boolean
+  model_first_response_timeout?: Record<
+    string,
+    Array<{ context_tokens: number; timeout_ms: number }>
+  >
   proxy?: string
   pass_through_body_enabled?: boolean
   responses_websocket_enabled?: boolean

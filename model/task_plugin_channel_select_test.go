@@ -117,3 +117,29 @@ func TestNewAPIChannelServesExtendedTaskPlugins(t *testing.T) {
 	require.NotNil(t, selected)
 	assert.Equal(t, "gateway", selected.Name, "requests without a pinned plugin keep using the gateway")
 }
+
+func TestCountSatisfiedChannelsMemoryCache(t *testing.T) {
+	truncateTables(t)
+	originalMemoryCache := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() { common.MemoryCacheEnabled = originalMemoryCache; InitChannelCache() })
+
+	priority := int64(0)
+	weight := uint(1)
+	baseURL := "https://example.com"
+	channels := []Channel{
+		{Id: 930001, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: "a", Models: "shared", Group: "default", Priority: &priority, Weight: &weight, BaseURL: &baseURL},
+		{Id: 930002, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: "b", Models: "shared", Group: "default", Priority: &priority, Weight: &weight, BaseURL: &baseURL},
+		{Id: 930003, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Name: "solo", Models: "solo", Group: "default", Priority: &priority, Weight: &weight, BaseURL: &baseURL},
+		{Id: 930004, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusManuallyDisabled, Name: "off", Models: "shared", Group: "default", Priority: &priority, Weight: &weight, BaseURL: &baseURL},
+	}
+	for i := range channels {
+		require.NoError(t, channels[i].Insert())
+	}
+	InitChannelCache()
+
+	assert.Equal(t, 2, CountSatisfiedChannels("default", "shared", nil))
+	assert.Equal(t, 1, CountSatisfiedChannels("default", "solo", nil))
+	assert.Equal(t, 0, CountSatisfiedChannels("default", "missing", nil))
+	assert.Equal(t, 0, CountSatisfiedChannels("other-group", "shared", nil))
+}

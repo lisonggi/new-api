@@ -16,8 +16,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export { CTA } from './sections/cta'
-export { Features } from './sections/features'
-export { Hero } from './sections/hero'
-export { HowItWorks } from './sections/how-it-works'
-export { Stats } from './sections/stats'
+export type RedemptionSuccessDialogConfig = {
+  enabled: boolean
+  title: string
+  content: string
+  close_button_text: string
+}
+
+// Limits mirrored from the backend `setting/redemption_dialog` package.
+// Character limits are Unicode code points, matching the Go rune count.
+export const REDEMPTION_DIALOG_LIMITS = {
+  maxTitleLength: 80,
+  maxContentLength: 4000,
+  maxCloseButtonLength: 20,
+} as const
+
+export const EMPTY_REDEMPTION_DIALOG_CONFIG: RedemptionSuccessDialogConfig = {
+  enabled: false,
+  title: '',
+  content: '',
+  close_button_text: '',
+}

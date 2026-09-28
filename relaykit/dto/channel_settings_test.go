@@ -732,3 +732,129 @@ func TestChannelOtherSettingsValidateToolLossPolicy(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "tool_loss_policy")
 }
+
+func TestChannelSettingsResolveFirstResponseTimeout(t *testing.T) {
+	settings := ChannelSettings{
+		ModelFirstResponseTimeout: map[string][]FirstResponseTimeoutTier{
+			"deepseek-v4.1": {
+				{ContextTokens: 32000, TimeoutMs: 1000},
+				{ContextTokens: 200000, TimeoutMs: 3000},
+				{ContextTokens: 1000000, TimeoutMs: 5000},
+			},
+			"claude-sonnet": {
+				{ContextTokens: 200000, TimeoutMs: 2500},
+			},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		model        string
+		promptTokens int
+		want         int
+	}{
+		{name: "first tier", model: "deepseek-v4.1", promptTokens: 16000, want: 1000},
+		{name: "boundary of first tier", model: "deepseek-v4.1", promptTokens: 32000, want: 1000},
+		{name: "middle tier", model: "deepseek-v4.1", promptTokens: 100000, want: 3000},
+		{name: "boundary of middle tier", model: "deepseek-v4.1", promptTokens: 200000, want: 3000},
+		{name: "last tier", model: "deepseek-v4.1", promptTokens: 500000, want: 5000},
+		{name: "beyond last tier falls back to last", model: "deepseek-v4.1", promptTokens: 2000000, want: 5000},
+		{name: "single tier model", model: "claude-sonnet", promptTokens: 100, want: 2500},
+		{name: "unconfigured model", model: "gpt-4o", promptTokens: 100, want: 0},
+		{name: "unknown context returns zero", model: "deepseek-v4.1", promptTokens: 0, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, settings.ResolveFirstResponseTimeout(tt.model, tt.promptTokens))
+		})
+	}
+
+	assert.Equal(t, 0, ChannelSettings{}.ResolveFirstResponseTimeout("any", 100))
+}
+
+func TestChannelSettingsResolveFirstResponseTimeoutToleratesUnsortedTiers(t *testing.T) {
+	settings := ChannelSettings{
+		ModelFirstResponseTimeout: map[string][]FirstResponseTimeoutTier{
+			"deepseek-v4.1": {
+				{ContextTokens: 200000, TimeoutMs: 3000},
+				{ContextTokens: 32000, TimeoutMs: 1000},
+			},
+		},
+	}
+
+	// 16K fits both tiers; the tightest (smallest) context bound must win, even
+	// though the tiers are stored out of order.
+	assert.Equal(t, 1000, settings.ResolveFirstResponseTimeout("deepseek-v4.1", 16000))
+	// 250K exceeds every bound and falls back to the largest (catch-all) tier.
+	assert.Equal(t, 3000, settings.ResolveFirstResponseTimeout("deepseek-v4.1", 250000))
+}
+
+func TestChannelSettingsResolveFirstResponseTimeoutClampsOverflow(t *testing.T) {
+	settings := ChannelSettings{
+		ModelFirstResponseTimeout: map[string][]FirstResponseTimeoutTier{
+			"legacy": {
+				// 18446744073710 ms overflows time.Duration when multiplied by
+				// time.Millisecond; the resolver must clamp it.
+				{ContextTokens: 200000, TimeoutMs: 18446744073710},
+			},
+		},
+	}
+	assert.Equal(t, MaxFirstResponseTimeoutMs, settings.ResolveFirstResponseTimeout("legacy", 100))
+}
+
+func TestChannelSettingsValidateFirstResponseTimeout(t *testing.T) {
+	require.NoError(t, (&ChannelSettings{}).ValidateFirstResponseTimeout())
+	require.NoError(t, (&ChannelSettings{
+		ModelFirstResponseTimeout: map[string][]FirstResponseTimeoutTier{
+			"m": {{ContextTokens: 32000, TimeoutMs: 1000}, {ContextTokens: 200000, TimeoutMs: 3000}},
+		},
+	}).ValidateFirstResponseTimeout())
+
+	tests := []struct {
+		name  string
+		tiers []FirstResponseTimeoutTier
+		want  string
+	}{
+		{
+			name:  "unsorted tiers",
+			tiers: []FirstResponseTimeoutTier{{ContextTokens: 200000, TimeoutMs: 3000}, {ContextTokens: 32000, TimeoutMs: 1000}},
+			want:  "strictly increasing",
+		},
+		{
+			name:  "duplicate context bound",
+			tiers: []FirstResponseTimeoutTier{{ContextTokens: 32000, TimeoutMs: 1000}, {ContextTokens: 32000, TimeoutMs: 2000}},
+			want:  "strictly increasing",
+		},
+		{
+			name:  "non-positive context bound",
+			tiers: []FirstResponseTimeoutTier{{ContextTokens: 0, TimeoutMs: 1000}},
+			want:  "context_tokens must be positive",
+		},
+		{
+			name:  "non-positive timeout",
+			tiers: []FirstResponseTimeoutTier{{ContextTokens: 32000, TimeoutMs: 0}},
+			want:  "timeout_ms must be positive",
+		},
+		{
+			name:  "negative timeout",
+			tiers: []FirstResponseTimeoutTier{{ContextTokens: 32000, TimeoutMs: -5}},
+			want:  "timeout_ms must be positive",
+		},
+		{
+			name:  "overflow timeout",
+			tiers: []FirstResponseTimeoutTier{{ContextTokens: 32000, TimeoutMs: 18446744073710}},
+			want:  "timeout_ms exceeds maximum",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (&ChannelSettings{
+				ModelFirstResponseTimeout: map[string][]FirstResponseTimeoutTier{"m": tt.tiers},
+			}).ValidateFirstResponseTimeout()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}

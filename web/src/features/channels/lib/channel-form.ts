@@ -161,6 +161,63 @@ function isOptionalStatusCodeMapping(value: string | undefined): boolean {
   }
 }
 
+// Mirror the backend MaxFirstResponseTimeoutMs: the largest millisecond value
+// that still converts to a time.Duration without overflowing (~292 years).
+const MAX_FIRST_RESPONSE_TIMEOUT_MS = 9223372036854
+
+function isOptionalModelFirstResponseTimeout(
+  value: string | undefined
+): boolean {
+  try {
+    const parsed = parseOptionalJson(value)
+    if (parsed === undefined) return true
+    if (!isJsonObjectValue(parsed)) return false
+    return Object.values(parsed).every((tiers) => {
+      if (!Array.isArray(tiers) || tiers.length === 0) return false
+      let prevContextTokens = -1
+      return tiers.every((tier) => {
+        if (!isJsonObjectValue(tier)) return false
+        const contextTokens = tier.context_tokens
+        const timeoutMs = tier.timeout_ms
+        if (
+          !Number.isInteger(contextTokens) ||
+          Number(contextTokens) <= 0 ||
+          !Number.isInteger(timeoutMs) ||
+          Number(timeoutMs) <= 0 ||
+          Number(timeoutMs) > MAX_FIRST_RESPONSE_TIMEOUT_MS
+        ) {
+          return false
+        }
+        if (Number(contextTokens) <= prevContextTokens) return false
+        prevContextTokens = Number(contextTokens)
+        return true
+      })
+    })
+  } catch {
+    return false
+  }
+}
+
+function parseModelFirstResponseTimeout(
+  raw: string | undefined
+):
+  | Record<string, Array<{ context_tokens: number; timeout_ms: number }>>
+  | undefined {
+  if (!raw || !raw.trim()) return undefined
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return undefined
+    }
+    return parsed as Record<
+      string,
+      Array<{ context_tokens: number; timeout_ms: number }>
+    >
+  } catch {
+    return undefined
+  }
+}
+
 function isCodexCredential(value: string | undefined): boolean {
   try {
     const parsed = parseOptionalJson(value)
@@ -263,6 +320,15 @@ export const channelFormSchema = z
     // Channel extra settings (stored in setting JSON, not sent directly)
     force_format: z.boolean().optional(),
     thinking_to_content: z.boolean().optional(),
+    reasoning_content_backfill: z.boolean().optional(),
+    ignore_response_model_mismatch: z.boolean().optional(),
+    model_first_response_timeout: z
+      .string()
+      .optional()
+      .refine(
+        isOptionalModelFirstResponseTimeout,
+        'Model first response timeout must be a JSON object mapping model names to tiers'
+      ),
     proxy: z
       .string()
       .optional()
@@ -457,6 +523,9 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   // Channel extra settings
   force_format: false,
   thinking_to_content: false,
+  reasoning_content_backfill: false,
+  ignore_response_model_mismatch: false,
+  model_first_response_timeout: '',
   proxy: '',
   http_protocol: HTTP_PROTOCOL_AUTO,
   http2_connection_shards: 1,
@@ -501,6 +570,9 @@ export function transformChannelToFormDefaults(
     task_extend_plugin_keys: [] as string[],
     force_format: false,
     thinking_to_content: false,
+    reasoning_content_backfill: false,
+    ignore_response_model_mismatch: false,
+    model_first_response_timeout: '',
     proxy: '',
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
     http2_connection_shards: 1,
@@ -522,6 +594,15 @@ export function transformChannelToFormDefaults(
         task_extend_plugin_keys: readTaskExtendPluginKeys(channel.type, parsed),
         force_format: parsed.force_format || false,
         thinking_to_content: parsed.thinking_to_content || false,
+        reasoning_content_backfill: parsed.reasoning_content_backfill === true,
+        ignore_response_model_mismatch:
+          parsed.ignore_response_model_mismatch === true,
+        model_first_response_timeout:
+          parsed.model_first_response_timeout &&
+          typeof parsed.model_first_response_timeout === 'object' &&
+          !Array.isArray(parsed.model_first_response_timeout)
+            ? JSON.stringify(parsed.model_first_response_timeout, null, 2)
+            : '',
         proxy: parsed.proxy || '',
         http_protocol: protocol,
         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
@@ -655,6 +736,12 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
         : undefined,
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,
+    reasoning_content_backfill: formData.reasoning_content_backfill === true,
+    ignore_response_model_mismatch:
+      formData.ignore_response_model_mismatch === true,
+    model_first_response_timeout: parseModelFirstResponseTimeout(
+      formData.model_first_response_timeout
+    ),
     proxy: formData.proxy?.trim() || '',
     pass_through_body_enabled:
       formData.type !== CHANNEL_TYPE_ADVANCED_CUSTOM &&

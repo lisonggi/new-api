@@ -78,6 +78,10 @@ func PrepareResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, req *d
 		}
 	}
 
+	// Normalize last so a param override cannot reintroduce a shape the target
+	// upstream rejects.
+	jsonData = relaycommon.NormalizeUpstreamRequest(jsonData, info)
+
 	logger.LogDebug(c, "requestBody: %s", jsonData)
 	body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 	if err != nil {

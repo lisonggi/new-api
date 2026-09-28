@@ -3,12 +3,14 @@ package helper
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -42,6 +44,56 @@ func requestContextDone(c *gin.Context) bool {
 	return c != nil && c.Request != nil && c.Request.Context().Err() != nil
 }
 
+// errorMessageMappingWriteRecorder wraps the response writer to record whether
+// the underlying writer accepted every byte. gin's ResponseWriter exposes
+// WriteString (uppercase), so common.CustomEvent never takes the lowercase
+// writeString fast path and all of its bytes go through Write; this wrapper
+// therefore observes every SSE byte without changing the encoder.
+type errorMessageMappingWriteRecorder struct {
+	gin.ResponseWriter
+	err error
+}
+
+func (w *errorMessageMappingWriteRecorder) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if err == nil && n < len(p) {
+		err = io.ErrShortWrite
+	}
+	if err != nil && w.err == nil {
+		w.err = err
+	}
+	return n, err
+}
+
+// renderErrorMessageMappingFrame renders SSE data parts with the same
+// common.CustomEvent encoder as before. When terminal is false it uses the
+// original render-and-flush path, so non-terminal and out-of-scope writes keep
+// their exact bytes and cost. When terminal is true it wraps the writer to
+// record the real local write result: a nil error means the writer accepted
+// every byte and the flush succeeded, so the caller may record a terminal
+// event; a failed or short write leaves it unset.
+func renderErrorMessageMappingFrame(c *gin.Context, terminal bool, parts ...string) error {
+	if !terminal {
+		for _, part := range parts {
+			c.Render(-1, common.CustomEvent{Data: part})
+		}
+		return FlushWriter(c)
+	}
+
+	recorder := &errorMessageMappingWriteRecorder{ResponseWriter: c.Writer}
+	original := c.Writer
+	c.Writer = recorder
+	defer func() { c.Writer = original }()
+
+	for _, part := range parts {
+		c.Render(-1, common.CustomEvent{Data: part})
+		if recorder.err != nil {
+			return recorder.err
+		}
+	}
+	return FlushWriter(c)
+}
+
 func SetEventStreamHeaders(c *gin.Context) {
 	// 检查是否已经设置过头部
 	if _, exists := c.Get("event_stream_headers_set"); exists {
@@ -67,10 +119,19 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 	if err != nil {
 		common.SysError("error marshalling stream response: " + err.Error())
 	} else {
-		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
+		mapped, terminal := service.PrepareErrorMessageMappingSSEFrame(c, jsonData)
+		writeErr := renderErrorMessageMappingFrame(
+			c,
+			terminal,
+			fmt.Sprintf("event: %s\n", resp.Type),
+			"data: "+string(mapped),
+		)
+		// Terminal is only recorded when the frame actually reached the
+		// client; a failed write must not suppress a later error event.
+		if writeErr == nil && terminal {
+			service.MarkErrorMessageMappingTerminal(c)
+		}
 	}
-	_ = FlushWriter(c)
 	return nil
 }
 
@@ -79,9 +140,16 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 		return
 	}
 
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
-	_ = FlushWriter(c)
+	mapped, terminal := service.PrepareErrorMessageMappingSSEFrame(c, []byte(data))
+	writeErr := renderErrorMessageMappingFrame(
+		c,
+		terminal,
+		fmt.Sprintf("event: %s\n", resp.Type),
+		fmt.Sprintf("data: %s\n", string(mapped)),
+	)
+	if writeErr == nil && terminal {
+		service.MarkErrorMessageMappingTerminal(c)
+	}
 }
 
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) error {
@@ -89,9 +157,19 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
-	return FlushWriter(c)
+	mapped, terminal := service.PrepareErrorMessageMappingSSEFrame(c, []byte(data))
+	if err := renderErrorMessageMappingFrame(
+		c,
+		terminal,
+		fmt.Sprintf("event: %s\n", resp.Type),
+		fmt.Sprintf("data: %s", string(mapped)),
+	); err != nil {
+		return err
+	}
+	if terminal {
+		service.MarkErrorMessageMappingTerminal(c)
+	}
+	return nil
 }
 
 func StringData(c *gin.Context, str string) error {
@@ -103,8 +181,12 @@ func StringData(c *gin.Context, str string) error {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	c.Render(-1, common.CustomEvent{Data: "data: " + str})
-	return FlushWriter(c)
+	mapped, terminal := service.PrepareErrorMessageMappingSSEFrame(c, []byte(str))
+	err := renderErrorMessageMappingFrame(c, terminal, "data: "+string(mapped))
+	if err == nil && terminal {
+		service.MarkErrorMessageMappingTerminal(c)
+	}
+	return err
 }
 
 func PingData(c *gin.Context) error {

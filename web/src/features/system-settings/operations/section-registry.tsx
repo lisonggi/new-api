@@ -25,6 +25,7 @@ import { PerformanceSection } from '../maintenance/performance-section'
 import { UpdateCheckerSection } from '../maintenance/update-checker-section'
 import type { OperationsSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { RedemptionSuccessDialogSection } from './redemption-success-dialog'
 
 const OPERATIONS_SECTIONS = [
   {
@@ -39,6 +40,11 @@ const OPERATIONS_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'redemption-dialog',
+    titleKey: 'Redemption success dialog',
+    build: () => <RedemptionSuccessDialogSection />,
   },
   {
     id: 'alerts',

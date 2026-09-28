@@ -33,7 +33,31 @@ export interface ApiResponse<T = unknown> {
  * Standard API response types
  */
 export type TopupInfoResponse = ApiResponse<TopupInfo>
-export type RedemptionResponse = ApiResponse<number>
+/**
+ * Optional, admin-configured dialog attached to a successful redemption.
+ * Present only when the operator enabled it; the credited amount stays in
+ * `data` as a number.
+ */
+export interface RedemptionSuccessDialogPayload {
+  title: string
+  content: string
+  close_button_text: string
+}
+export type RedemptionResponse = ApiResponse<number> & {
+  success_dialog?: RedemptionSuccessDialogPayload
+}
+/**
+ * Result of one redemption attempt. The dialog payload is read from the
+ * redemption response itself, so a later balance refresh can never turn a
+ * successful redemption into a failure or drop its dialog.
+ */
+export type RedemptionResult =
+  | {
+      success: true
+      quotaAdded: number
+      dialog: RedemptionSuccessDialogPayload | null
+    }
+  | { success: false }
 export type AmountResponse = ApiResponse<string>
 export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
   url?: string

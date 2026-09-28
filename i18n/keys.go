@@ -343,3 +343,21 @@ const (
 	MsgCustomOAuthBindingNotFound   = "custom_oauth.binding_not_found"
 	MsgCustomOAuthProviderIdInvalid = "custom_oauth.provider_id_field_invalid"
 )
+
+// Error message mapping settings messages
+const (
+	MsgErrorMappingInvalidRequest  = "error_mapping.invalid_request"
+	MsgErrorMappingMessageRequired = "error_mapping.message_required"
+	MsgErrorMappingMessageTooLong  = "error_mapping.message_too_long"
+	MsgErrorMappingConfigRequired  = "error_mapping.config_required"
+	MsgErrorMappingSaveFailed      = "error_mapping.save_failed"
+	MsgErrorMappingBodyTooLarge    = "error_mapping.body_too_large"
+	MsgErrorMappingBodyReadFailed  = "error_mapping.body_read_failed"
+)
+
+// Redemption success dialog settings messages
+const (
+	MsgRedemptionDialogSaveFailed     = "redemption_dialog.save_failed"
+	MsgRedemptionDialogBodyTooLarge   = "redemption_dialog.body_too_large"
+	MsgRedemptionDialogBodyReadFailed = "redemption_dialog.body_read_failed"
+)

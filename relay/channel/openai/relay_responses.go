@@ -38,6 +38,9 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 	info.ObserveResponseModel(responsesResponse.Model)
 	responseBody = rewriteSGLangResponsesCreatedAt(info, responseBody, "created_at", responsesResponse.CreatedAt)
+	// Map a status=failed body's error.message for the client. The parsed object
+	// above is untouched: only the serialized output bytes change.
+	responseBody = service.MapResponsesFailedBody(c, responseBody)
 
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)

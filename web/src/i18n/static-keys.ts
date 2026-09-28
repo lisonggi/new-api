@@ -819,4 +819,11 @@ export const STATIC_I18N_KEYS = [
   'Vendor name and icon must not exceed 128 characters.',
   'Shown',
   'Not shown',
+  // Error message mapping: rule form validation messages are produced by the
+  // Zod schema and passed to t() dynamically, so register them here.
+  'Name is too long',
+  'Keyword is required',
+  'Keyword is too long',
+  'Replacement is required',
+  'Replacement is too long',
 ] as const

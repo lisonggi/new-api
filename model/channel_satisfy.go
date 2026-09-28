@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
@@ -65,4 +66,38 @@ func isChannelEnabledForGroupModelDB(group string, modelName string, channelID i
 
 func isChannelIDInList(list []int, channelID int) bool {
 	return slices.Contains(list, channelID)
+}
+
+// CountSatisfiedChannels returns the number of enabled candidate channels for a
+// group+model pair after applying the request filters, mirroring the candidate
+// discovery in GetRandomSatisfiedChannel (exact model name, then the normalized
+// routing name). It is read-only and never advances selection state. Used to decide
+// whether a per-model first-byte timeout may safely fail the current channel.
+func CountSatisfiedChannels(group, model string, filters []dto.ChannelFilter) int {
+	if !common.MemoryCacheEnabled {
+		return countSatisfiedChannelsDB(group, model, filters)
+	}
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	channels, _ := filterCandidateIDs(group2model2channels[group][model], model, filters)
+	if len(channels) == 0 {
+		normalized := ratio_setting.RoutingMatchModelName(model)
+		if normalized != "" && normalized != model {
+			channels, _ = filterCandidateIDs(group2model2channels[group][normalized], model, filters)
+		}
+	}
+	return len(channels)
+}
+
+func countSatisfiedChannelsDB(group, model string, filters []dto.ChannelFilter) int {
+	var abilities []Ability
+	if err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Find(&abilities).Error; err != nil {
+		return 0
+	}
+	abilities = filterAbilitiesByConstraints(abilities, model, filters)
+	seen := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		seen[ability.ChannelId] = struct{}{}
+	}
+	return len(seen)
 }

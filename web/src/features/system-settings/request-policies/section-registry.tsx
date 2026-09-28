@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { createSectionRegistry } from '../utils/section-registry'
 import { ChannelHealthSection } from './channel-health-section'
 import type { RequestPolicySettings } from './defaults'
+import { ErrorMessageMappingSection } from './error-mapping'
 import { RequestChecksSection } from './request-checks-section'
 import { RoutingPolicySection } from './routing-section'
 
@@ -47,6 +48,11 @@ const POLICY_SECTIONS = [
     build: (settings: RequestPolicySettings) => (
       <ChannelHealthSection defaultValues={settings} />
     ),
+  },
+  {
+    id: 'error-mapping',
+    titleKey: 'Error message mapping',
+    build: () => <ErrorMessageMappingSection />,
   },
 ] as const
 

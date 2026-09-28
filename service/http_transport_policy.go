@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -15,6 +16,10 @@ import (
 type HTTPTransportPolicy struct {
 	Protocol string // dto.HTTPProtocolAuto or dto.HTTPProtocolHTTP1
 	Shards   int    // 1..dto.MaxHTTP2ConnectionShards
+	// ResponseHeaderTimeout overrides the transport's response-header
+	// (time-to-first-byte) timeout. Zero means use the global
+	// RELAY_RESPONSE_HEADER_TIMEOUT default.
+	ResponseHeaderTimeout time.Duration
 }
 
 var httpTransportPolicyWarnings sync.Map
@@ -83,7 +88,14 @@ func warnHTTPTransportPolicyOnce(field, value string) {
 }
 
 func (p HTTPTransportPolicy) cacheKeyPart() string {
-	return fmt.Sprintf("%s|%d", p.Protocol, p.Shards)
+	return fmt.Sprintf("%s|%d|%d", p.Protocol, p.Shards, p.ResponseHeaderTimeout.Milliseconds())
+}
+
+// WithResponseHeaderTimeout returns a copy of the policy with the given
+// response-header (time-to-first-byte) timeout applied.
+func (p HTTPTransportPolicy) WithResponseHeaderTimeout(timeout time.Duration) HTTPTransportPolicy {
+	p.ResponseHeaderTimeout = timeout
+	return p
 }
 
 func (p HTTPTransportPolicy) String() string {

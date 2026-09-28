@@ -2,24 +2,41 @@ package dto
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
 type ChannelSettings struct {
-	TaskPluginKey             string `json:"task_plugin_key,omitempty"`
-	ForceFormat               bool   `json:"force_format,omitempty"`
-	ThinkingToContent         bool   `json:"thinking_to_content,omitempty"`
-	Proxy                     string `json:"proxy"`
-	PassThroughBodyEnabled    bool   `json:"pass_through_body_enabled,omitempty"`
-	ResponsesWebSocketEnabled bool   `json:"responses_websocket_enabled,omitempty"`
-	SystemPrompt              string `json:"system_prompt,omitempty"`
-	SystemPromptOverride      bool   `json:"system_prompt_override,omitempty"`
+	TaskPluginKey     string `json:"task_plugin_key,omitempty"`
+	ForceFormat       bool   `json:"force_format,omitempty"`
+	ThinkingToContent bool   `json:"thinking_to_content,omitempty"`
+	// ReasoningContentBackfill backfills a missing reasoning_content on assistant
+	// tool-call messages before sending upstream, for DeepSeek thinking-mode
+	// upstreams that reject history without it. Opt-in per channel.
+	ReasoningContentBackfill bool `json:"reasoning_content_backfill,omitempty"`
+	// IgnoreResponseModelMismatch suppresses the "response model mismatch"
+	// warning when an upstream returns a model name different from the
+	// requested or upstream model (for example when the upstream model name is
+	// a routing ID). Opt-in per channel.
+	IgnoreResponseModelMismatch bool `json:"ignore_response_model_mismatch,omitempty"`
+	// ModelFirstResponseTimeout is a per-model first-response (time-to-first-byte)
+	// timeout budget tiered by prompt context size. Tiers are inclusive
+	// context-token upper bounds ordered strictly ascending; the final (largest)
+	// tier also applies to any larger context. An absent model key or an empty
+	// tier list disables the timeout. Opt-in per channel.
+	ModelFirstResponseTimeout map[string][]FirstResponseTimeoutTier `json:"model_first_response_timeout,omitempty"`
+	Proxy                     string                                `json:"proxy"`
+	PassThroughBodyEnabled    bool                                  `json:"pass_through_body_enabled,omitempty"`
+	ResponsesWebSocketEnabled bool                                  `json:"responses_websocket_enabled,omitempty"`
+	SystemPrompt              string                                `json:"system_prompt,omitempty"`
+	SystemPromptOverride      bool                                  `json:"system_prompt_override,omitempty"`
 	// TaskExtendPluginKeys lists the task plugins a New API channel (type 60)
 	// is extended with. The upstream gateway may host many plugins, so the
 	// channel serves every listed plugin's models while the request still pins
@@ -32,6 +49,93 @@ type ChannelSettings struct {
 	// HTTP2ConnectionShards spreads HTTP/2 traffic across N independent transports
 	// (1-8). Zero/unset means 1. Ignored when HTTPProtocol is "http1".
 	HTTP2ConnectionShards int `json:"http2_connection_shards,omitempty"`
+}
+
+// FirstResponseTimeoutTier pairs an inclusive prompt-token upper bound with the
+// first-response timeout in milliseconds. Tiers are ordered by ContextTokens
+// ascending; the final tier also applies to any larger context.
+type FirstResponseTimeoutTier struct {
+	ContextTokens int `json:"context_tokens"`
+	TimeoutMs     int `json:"timeout_ms"`
+}
+
+// MaxFirstResponseTimeoutMs is the largest first-response timeout in milliseconds
+// that still converts to a time.Duration without overflowing (~292 years).
+const MaxFirstResponseTimeoutMs = int(int64(math.MaxInt64) / int64(time.Millisecond))
+
+// ResolveFirstResponseTimeout returns the first-response timeout in milliseconds
+// for a model at the given prompt-token count, or 0 when no tier applies (or the
+// context is unknown, expressed as promptTokens <= 0). The result is clamped to
+// MaxFirstResponseTimeoutMs so legacy values cannot overflow a time.Duration.
+func (s ChannelSettings) ResolveFirstResponseTimeout(model string, promptTokens int) int {
+	tiers := s.ModelFirstResponseTimeout[model]
+	if len(tiers) == 0 || promptTokens <= 0 {
+		return 0
+	}
+	// Tiers are validated as strictly ascending at save time, but scan anyway so
+	// legacy unsorted data still honors the tightest (smallest) context bound that
+	// covers promptTokens. Context values beyond every tier fall back to the largest
+	// bound (the catch-all tier).
+	bestIdx := -1
+	largestIdx := -1
+	for i := range tiers {
+		tier := &tiers[i]
+		if tier.ContextTokens <= 0 || tier.TimeoutMs <= 0 {
+			continue
+		}
+		if largestIdx < 0 || tier.ContextTokens > tiers[largestIdx].ContextTokens {
+			largestIdx = i
+		}
+		if promptTokens <= tier.ContextTokens {
+			if bestIdx < 0 || tier.ContextTokens < tiers[bestIdx].ContextTokens {
+				bestIdx = i
+			}
+		}
+	}
+	idx := bestIdx
+	if idx < 0 {
+		idx = largestIdx
+	}
+	if idx < 0 {
+		return 0
+	}
+	if ms := tiers[idx].TimeoutMs; ms > MaxFirstResponseTimeoutMs {
+		return MaxFirstResponseTimeoutMs
+	} else {
+		return ms
+	}
+}
+
+// ValidateFirstResponseTimeout validates the per-model first-response timeout
+// configuration: tiers must be strictly ascending by context_tokens with positive
+// context bounds and positive, in-range millisecond values that do not overflow
+// time.Duration.
+func (s *ChannelSettings) ValidateFirstResponseTimeout() error {
+	if s == nil {
+		return nil
+	}
+	for model, tiers := range s.ModelFirstResponseTimeout {
+		if len(tiers) == 0 {
+			continue
+		}
+		prev := -1
+		for _, tier := range tiers {
+			if tier.ContextTokens <= 0 {
+				return fmt.Errorf("model_first_response_timeout[%s]: context_tokens must be positive", model)
+			}
+			if tier.ContextTokens <= prev {
+				return fmt.Errorf("model_first_response_timeout[%s]: context_tokens must be strictly increasing", model)
+			}
+			if tier.TimeoutMs <= 0 {
+				return fmt.Errorf("model_first_response_timeout[%s]: timeout_ms must be positive", model)
+			}
+			if tier.TimeoutMs > MaxFirstResponseTimeoutMs {
+				return fmt.Errorf("model_first_response_timeout[%s]: timeout_ms exceeds maximum of %d", model, MaxFirstResponseTimeoutMs)
+			}
+			prev = tier.ContextTokens
+		}
+	}
+	return nil
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,

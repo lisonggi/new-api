@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
@@ -162,6 +163,34 @@ func TestDecideRelayRetryReasons(t *testing.T) {
 			assert.Equal(t, tc.want.Action == "retry", ShouldRetryRelayError(c, tc.err, tc.retries))
 		})
 	}
+}
+
+func TestWouldRetryFirstByteTimeoutGatesOnRetryAndChannelChange(t *testing.T) {
+	previousRetryTimes := common.RetryTimes
+	previousRanges := operation_setting.AutomaticRetryStatusCodeRanges
+	t.Cleanup(func() {
+		common.RetryTimes = previousRetryTimes
+		operation_setting.AutomaticRetryStatusCodeRanges = previousRanges
+	})
+	common.RetryTimes = 1
+
+	// The timeout must not abort the request when the operator's retry status-code
+	// rules do not cover 500, even if another candidate channel were available.
+	operation_setting.AutomaticRetryStatusCodeRanges = []operation_setting.StatusCodeRange{{Start: 429, End: 429}}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.False(t, WouldRetryFirstByteTimeout(c, "default", "m", 0))
+
+	// An exhausted retry budget also suppresses the timeout.
+	operation_setting.AutomaticRetryStatusCodeRanges = previousRanges
+	require.False(t, WouldRetryFirstByteTimeout(c, "default", "m", 1))
+
+	// A same-channel pin retries on the very same channel, so a timeout would not
+	// fail over anywhere: it must stay disarmed.
+	pinned, _ := gin.CreateTestContext(httptest.NewRecorder())
+	GetChannelConstraints(pinned).AddPin(dto.ChannelPin{
+		ChannelId: 7, Source: dto.PinSourceOriginTask, Rank: dto.PinRankOriginTask, RetryMode: dto.PinRetrySameChannel,
+	})
+	require.False(t, WouldRetryFirstByteTimeout(pinned, "default", "m", 0))
 }
 
 func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {

@@ -203,6 +203,39 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	return channel, selectGroup, nil
 }
 
+// WouldRetryFirstByteTimeout reports whether a first-byte timeout failure on the
+// current attempt would actually be retried on a DIFFERENT channel. It replays the
+// retry decision for the timeout's error (do_request_failed / 500), rejects requests
+// pinned to a single channel (same-channel retry), and requires another candidate
+// channel to fail over to. It gates the timeout so it never aborts a request whose
+// retry would not change channel — for example when the operator's retry status-code
+// rules do not cover 500, when the request is pinned (origin-task / token pin), or
+// when this is the only candidate channel.
+func WouldRetryFirstByteTimeout(c *gin.Context, tokenGroup, modelName string, retry int) bool {
+	timeoutErr := types.NewError(errors.New("first response timeout"), types.ErrorCodeDoRequestFailed)
+	if DecideRelayRetry(c, timeoutErr, common.RetryTimes-retry).Action != "retry" {
+		return false
+	}
+	// A resolved pin keeps retries on the pinned channel (PinRetrySameChannel) or
+	// forbids them entirely (PinRetrySingleAttempt, already covered by
+	// DecideRelayRetry). Either way the request cannot fail over to a different
+	// channel, so a timeout would only restart the very same upstream.
+	if _, pinned, _ := GetChannelConstraints(c).ResolvedPin(); pinned {
+		return false
+	}
+	filters := GetChannelConstraints(c).Filters
+	if tokenGroup == "auto" {
+		userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+		for _, group := range GetRequestAutoGroups(c, userGroup) {
+			if model.CountSatisfiedChannels(group, modelName, filters) > 1 {
+				return true
+			}
+		}
+		return false
+	}
+	return model.CountSatisfiedChannels(tokenGroup, modelName, filters) > 1
+}
+
 func pinnedTaskPluginIdentities(c *gin.Context, expected string) ([]int, []string) {
 	if c == nil || expected == "" {
 		return nil, nil

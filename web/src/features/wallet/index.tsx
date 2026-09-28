@@ -20,9 +20,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
+import { RedemptionSuccessDialog } from '@/components/redemption-success-dialog'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { getSelf } from '@/lib/api'
+import { formatQuota } from '@/lib/format'
 
 import { AffiliateRewardsCard } from './components/affiliate-rewards-card'
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
@@ -37,7 +39,7 @@ import {
   useTopupInfo,
   usePayment,
   useAffiliate,
-  useRedemption,
+  useRedemptionFlow,
   useCreemPayment,
   useWaffoPayment,
   useWaffoPancakePayment,
@@ -74,7 +76,6 @@ export function Wallet(props: WalletProps) {
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [transferDialogOpen, setTransferDialogOpen] = useState(false)
   const [billingDialogOpen, setBillingDialogOpen] = useState(false)
-  const [redemptionCode, setRedemptionCode] = useState('')
   const [creemDialogOpen, setCreemDialogOpen] = useState(false)
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
@@ -103,7 +104,6 @@ export function Wallet(props: WalletProps) {
     transferQuota,
     transferring,
   } = useAffiliate()
-  const { redeeming, redeemCode } = useRedemption()
   const { processing: creemProcessing, processCreemPayment } = useCreemPayment()
   const { processing: waffoProcessing, processWaffoPayment } = useWaffoPayment()
   const { processing: pancakeProcessing, processWaffoPancakePayment } =
@@ -128,6 +128,8 @@ export function Wallet(props: WalletProps) {
   useEffect(() => {
     fetchUser()
   }, [fetchUser])
+
+  const redemptionFlow = useRedemptionFlow(fetchUser)
 
   useEffect(() => {
     if (props.initialShowHistory) {
@@ -207,17 +209,6 @@ export function Wallet(props: WalletProps) {
 
     if (success) {
       setConfirmDialogOpen(false)
-      await fetchUser()
-    }
-  }
-
-  // Handle redemption
-  const handleRedeem = async () => {
-    if (!redemptionCode) return
-
-    const success = await redeemCode(redemptionCode)
-    if (success) {
-      setRedemptionCode('')
       await fetchUser()
     }
   }
@@ -309,10 +300,10 @@ export function Wallet(props: WalletProps) {
                   calculating={calculating}
                   onPaymentMethodSelect={handlePaymentMethodSelect}
                   paymentLoading={paymentLoading}
-                  redemptionCode={redemptionCode}
-                  onRedemptionCodeChange={setRedemptionCode}
-                  onRedeem={handleRedeem}
-                  redeeming={redeeming}
+                  redemptionCode={redemptionFlow.code}
+                  onRedemptionCodeChange={redemptionFlow.setCode}
+                  onRedeem={redemptionFlow.submit}
+                  redeeming={redemptionFlow.redeeming}
                   topupLink={topupInfo?.topup_link}
                   loading={topupLoading}
                   priceRatio={(status?.price as number) || 1}
@@ -384,6 +375,15 @@ export function Wallet(props: WalletProps) {
         onConfirm={handleCreemConfirm}
         product={selectedCreemProduct}
         processing={creemProcessing}
+      />
+
+      <RedemptionSuccessDialog
+        open={redemptionFlow.dialogOpen}
+        onOpenChange={redemptionFlow.setDialogOpen}
+        dialog={redemptionFlow.dialog}
+        description={t('Redemption successful! Added: {{quota}}', {
+          quota: formatQuota(redemptionFlow.quotaAdded),
+        })}
       />
     </>
   )

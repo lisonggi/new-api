@@ -144,6 +144,10 @@ func relayResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, adaptor 
 		}
 	}
 
+	// Normalize last so a param override cannot reintroduce a shape the target
+	// upstream rejects.
+	jsonData = relaycommon.NormalizeUpstreamRequest(jsonData, info)
+
 	body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())

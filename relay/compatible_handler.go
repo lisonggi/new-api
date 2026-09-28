@@ -138,6 +138,10 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 			}
 		}
 
+		// Normalize last so a param override cannot reintroduce a shape the
+		// target upstream rejects.
+		jsonData = relaycommon.NormalizeUpstreamRequest(jsonData, info)
+
 		logger.LogDebug(c, "text request body: %s", jsonData)
 
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)

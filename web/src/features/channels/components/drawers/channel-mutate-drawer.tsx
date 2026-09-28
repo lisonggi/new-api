@@ -296,6 +296,7 @@ const SENSITIVE_FORM_FIELDS = [
   'azure_responses_version',
   'force_format',
   'thinking_to_content',
+  'reasoning_content_backfill',
   'proxy',
   'http_protocol',
   'http2_connection_shards',
@@ -1922,6 +1923,58 @@ export function ChannelMutateDrawer({
     />
   )
 
+  const reasoningBackfillFields = (
+    <FormField
+      control={form.control}
+      name='reasoning_content_backfill'
+      render={({ field }) => (
+        <FormItem className='flex items-center justify-between px-4 py-3'>
+          <div className='space-y-0.5'>
+            <FormLabel>{t('Reasoning content backfill')}</FormLabel>
+            <FormDescription>
+              {t(
+                'Backfill missing reasoning_content on assistant tool-call messages for DeepSeek thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.'
+              )}
+            </FormDescription>
+          </div>
+          <FormControl>
+            <Switch
+              disabled={sensitiveLocked}
+              checked={field.value}
+              onCheckedChange={field.onChange}
+            />
+          </FormControl>
+        </FormItem>
+      )}
+    />
+  )
+
+  const ignoreResponseModelMismatchFields = (
+    <FormField
+      control={form.control}
+      name='ignore_response_model_mismatch'
+      render={({ field }) => (
+        <FormItem className='flex items-center justify-between px-4 py-3'>
+          <div className='space-y-0.5'>
+            <FormLabel>{t('Ignore response model mismatch')}</FormLabel>
+            <FormDescription>
+              {t(
+                'Skip the mismatch warning when the upstream returns a different model name (for example when the upstream model name is a routing ID).'
+              )}
+            </FormDescription>
+          </div>
+          <FormControl>
+            <Switch
+              disabled={sensitiveLocked}
+              checked={field.value}
+              onCheckedChange={field.onChange}
+            />
+          </FormControl>
+        </FormItem>
+      )}
+    />
+  )
+
   const taskPollingFields = (
     <FormField
       control={form.control}
@@ -2526,6 +2579,45 @@ export function ChannelMutateDrawer({
                 </AlertDescription>
               </Alert>
             )}
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </div>
+  )
+
+  const firstResponseTimeoutFields = (
+    <div
+      role='group'
+      aria-label={t('First response timeout')}
+      className={channelConfigurationBlockClassName(
+        configuration.blocks.modelMapping
+      )}
+    >
+      <FormField
+        control={form.control}
+        name='model_first_response_timeout'
+        render={({ field }) => (
+          <FormItem className='space-y-3'>
+            <div className='space-y-1'>
+              <FormLabel>{t('First response timeout')}</FormLabel>
+              <FormDescription>
+                {t(
+                  'Per-model time-to-first-byte timeout (milliseconds), tiered by prompt context size. Model keys use the requested model name, not the mapped upstream model. Only applies while a retry channel is available.'
+                )}
+              </FormDescription>
+            </div>
+            <FormControl>
+              <JsonCodeEditor
+                value={field.value || ''}
+                onChange={field.onChange}
+                name={field.name}
+                onBlur={field.onBlur}
+                textareaRef={field.ref}
+                disabled={sensitiveLocked || isSubmitting}
+                placeholder='{"model":[{"context_tokens":200000,"timeout_ms":3000}]}'
+              />
+            </FormControl>
             <FormMessage />
           </FormItem>
         )}
@@ -4628,6 +4720,7 @@ export function ChannelMutateDrawer({
         routing={
           <>
             {redirectPanelActive ? redirectPanelNotice : modelMappingFields}
+            {firstResponseTimeoutFields}
             {routingFields}
           </>
         }
@@ -4658,6 +4751,8 @@ export function ChannelMutateDrawer({
                 {formatFields}
                 {ollamaOpenAIChatFields}
                 {thinkingFields}
+                {reasoningBackfillFields}
+                {ignoreResponseModelMismatchFields}
                 {currentType !== CHANNEL_TYPE_ADVANCED_CUSTOM &&
                   passthroughFields}
                 {systemPromptFields}

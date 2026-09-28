@@ -412,13 +412,21 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 
 		switch info.RelayFormat {
 		case types.RelayFormatClaude:
+			claudeError := newAPIError.ToClaudeError()
+			if replacement, matched := service.ApplyErrorMessageMapping(c, newAPIError.ToClaudeError().Message); matched {
+				claudeError.Message = replacement
+			}
 			c.JSON(newAPIError.StatusCode, gin.H{
 				"type":  "error",
-				"error": newAPIError.ToClaudeError(),
+				"error": claudeError,
 			})
 		default:
+			openAIError := newAPIError.ToOpenAIError()
+			if replacement, matched := service.ApplyErrorMessageMapping(c, newAPIError.ToOpenAIError().Message); matched {
+				openAIError.Message = replacement
+			}
 			c.JSON(newAPIError.StatusCode, gin.H{
-				"error": newAPIError.ToOpenAIError(),
+				"error": openAIError,
 			})
 		}
 		return &usage, nil

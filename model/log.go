@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -606,9 +607,37 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 }
 
 type Stat struct {
-	Quota int `json:"quota"`
-	Rpm   int `json:"rpm"`
-	Tpm   int `json:"tpm"`
+	Quota        int   `json:"quota"`
+	Rpm          int   `json:"rpm"`
+	Tpm          int   `json:"tpm"`
+	CacheTokens  int64 `json:"cache_tokens"`
+	PromptTokens int64 `json:"prompt_tokens"`
+}
+
+// parseCacheReadTokens 提取日志 other JSON 中的缓存读取命中 token 数。
+// 缓存写入（cache_creation_tokens）与图片缓存不计入；
+// 空串、非法 JSON、缺键或非数值一律返回 0。
+func parseCacheReadTokens(other string) int64 {
+	if other == "" {
+		return 0
+	}
+	fields := make(map[string]json.RawMessage)
+	if err := common.UnmarshalJsonStr(other, &fields); err != nil {
+		return 0
+	}
+	raw, ok := fields["cache_tokens"]
+	if !ok {
+		return 0
+	}
+	var num json.Number
+	if err := common.UnmarshalJsonStr(string(raw), &num); err != nil || num == "" {
+		return 0
+	}
+	value, err := num.Int64()
+	if err != nil {
+		return 0
+	}
+	return value
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
@@ -617,21 +646,31 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
 
+	// 缓存命中率与 quota 使用相同的过滤范围；缓存命中数记录在 other JSON 中，
+	// 在应用层聚合，避免为各数据库编写方言相关的 JSON 提取 SQL
+	cacheQuery := LOG_DB.Table("logs").Select("prompt_tokens, other")
+
 	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
 		return stat, err
 	}
 	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "username", username); err != nil {
 		return stat, err
 	}
+	if cacheQuery, err = applyExplicitLogTextFilter(cacheQuery, "username", username); err != nil {
+		return stat, err
+	}
 	if tokenName != "" {
 		tx = tx.Where("token_name = ?", tokenName)
 		rpmTpmQuery = rpmTpmQuery.Where("token_name = ?", tokenName)
+		cacheQuery = cacheQuery.Where("token_name = ?", tokenName)
 	}
 	if startTimestamp != 0 {
 		tx = tx.Where("created_at >= ?", startTimestamp)
+		cacheQuery = cacheQuery.Where("created_at >= ?", startTimestamp)
 	}
 	if endTimestamp != 0 {
 		tx = tx.Where("created_at <= ?", endTimestamp)
+		cacheQuery = cacheQuery.Where("created_at <= ?", endTimestamp)
 	}
 	if tx, err = applyExplicitLogTextFilter(tx, "model_name", modelName); err != nil {
 		return stat, err
@@ -639,17 +678,23 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "model_name", modelName); err != nil {
 		return stat, err
 	}
+	if cacheQuery, err = applyExplicitLogTextFilter(cacheQuery, "model_name", modelName); err != nil {
+		return stat, err
+	}
 	if channel != 0 {
 		tx = tx.Where("channel_id = ?", channel)
 		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", channel)
+		cacheQuery = cacheQuery.Where("channel_id = ?", channel)
 	}
 	if group != "" {
 		tx = tx.Where(logGroupCol+" = ?", group)
 		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
+		cacheQuery = cacheQuery.Where(logGroupCol+" = ?", group)
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)
 	rpmTpmQuery = rpmTpmQuery.Where("type = ?", LogTypeConsume)
+	cacheQuery = cacheQuery.Where("type = ?", LogTypeConsume)
 
 	// 只统计最近60秒的rpm和tpm
 	rpmTpmQuery = rpmTpmQuery.Where("created_at >= ?", time.Now().Add(-60*time.Second).Unix())
@@ -669,6 +714,19 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	}
 	stat.Rpm = rateStat.Rpm
 	stat.Tpm = rateStat.Tpm
+
+	var cacheRows []struct {
+		PromptTokens int64
+		Other        string
+	}
+	if err := cacheQuery.Scan(&cacheRows).Error; err != nil {
+		common.SysError("failed to query cache stat: " + err.Error())
+		return stat, errors.New("查询统计数据失败")
+	}
+	for _, row := range cacheRows {
+		stat.PromptTokens += row.PromptTokens
+		stat.CacheTokens += parseCacheReadTokens(row.Other)
+	}
 
 	return stat, nil
 }

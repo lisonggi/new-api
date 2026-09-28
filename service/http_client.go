@@ -387,7 +387,17 @@ func GetHttpClientWithProxy(rawProxyURL string) (*http.Client, error) {
 // channel transport settings. Default auto + 1 shard shares the same client pool as
 // GetHttpClientWithProxy / GetHttpClient for the empty-proxy case.
 func GetHttpClientWithProxySettings(rawProxyURL string, settings dto.ChannelSettings) (*http.Client, error) {
+	return GetHttpClientWithProxyTimeout(rawProxyURL, settings, 0)
+}
+
+// GetHttpClientWithProxyTimeout returns a cached HTTP client for the proxy URL and
+// channel transport settings, with a per-request response-header (time-to-first-byte)
+// timeout override. A zero timeout uses the global RELAY_RESPONSE_HEADER_TIMEOUT.
+func GetHttpClientWithProxyTimeout(rawProxyURL string, settings dto.ChannelSettings, responseHeaderTimeout time.Duration) (*http.Client, error) {
 	policy := NormalizeHTTPTransportPolicy(settings)
+	if responseHeaderTimeout > 0 {
+		policy = policy.WithResponseHeaderTimeout(responseHeaderTimeout)
+	}
 	trimmedProxyURL := strings.TrimSpace(rawProxyURL)
 
 	if trimmedProxyURL == "" {

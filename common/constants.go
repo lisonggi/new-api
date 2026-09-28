@@ -12,9 +12,9 @@ import (
 
 var StartTime = time.Now().Unix() // unit: second
 var Version = "v0.0.0"            // this hard coding will be replaced automatically when building, no need to manually change
-var SystemName = "New API"
+var SystemName = "iioooo"
 var Footer = ""
-var Logo = ""
+var Logo = "/iioooo.logo.svg"
 var TopUpLink = ""
 
 // var ChatLink = ""

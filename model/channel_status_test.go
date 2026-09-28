@@ -100,3 +100,42 @@ func TestSaveStatusStateFromSingleKeySnapshotPreservesUnownedColumns(t *testing.
 	assert.Equal(t, "manual operation", otherInfo["status_reason"])
 	assert.Equal(t, float64(1234), otherInfo["status_time"])
 }
+
+func TestGetAllChannelsStableOrderForEqualPriority(t *testing.T) {
+	setupChannelStatusTest(t)
+
+	zero := int64(0)
+	high := int64(100)
+
+	// Insert three channels in non-sorted order. Two share priority 0, so the
+	// id tiebreaker is the only thing that determines their relative order.
+	rows := []*Channel{
+		{Name: "zero-a", Priority: &zero, Status: common.ChannelStatusEnabled},
+		{Name: "high", Priority: &high, Status: common.ChannelStatusEnabled},
+		{Name: "zero-b", Priority: &zero, Status: common.ChannelStatusEnabled},
+	}
+	for _, ch := range rows {
+		require.NoError(t, DB.Create(ch).Error)
+	}
+	aID := rows[0].Id // priority 0, smallest id
+	bID := rows[1].Id // priority 100
+	cID := rows[2].Id // priority 0, largest id
+
+	for _, tt := range []struct {
+		name        string
+		sortOptions []ChannelSortOptions
+	}{
+		{name: "default priority sort"},
+		{name: "explicit priority sort", sortOptions: []ChannelSortOptions{NewChannelSortOptions("priority", "desc", false)}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := GetAllChannels(0, 0, true, false, tt.sortOptions...)
+			require.NoError(t, err)
+			require.Len(t, got, 3)
+
+			// Highest priority first; the two equal-priority channels follow in
+			// id-ascending order so editing them never reshuffles the list.
+			assert.Equal(t, []int{bID, aID, cID}, []int{got[0].Id, got[1].Id, got[2].Id})
+		})
+	}
+}

@@ -119,6 +119,9 @@ func applyHTTPTransportPolicy(transport *http.Transport, policy HTTPTransportPol
 	if transport == nil {
 		return
 	}
+	if policy.ResponseHeaderTimeout > 0 {
+		transport.ResponseHeaderTimeout = policy.ResponseHeaderTimeout
+	}
 	if policy.Protocol == dto.HTTPProtocolHTTP1 {
 		applyHTTP1Force(transport)
 		return

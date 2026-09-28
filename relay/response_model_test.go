@@ -263,3 +263,24 @@ func TestResponseModelDoesNotRecordSynthesizedModel(t *testing.T) {
 	require.Nil(t, apiErr)
 	assert.Nil(t, info.ResponseModel)
 }
+
+func TestResponseModelIgnoreMismatchOptOut(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "requested",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "mapped",
+			ChannelSetting:    dto.ChannelSettings{IgnoreResponseModelMismatch: true},
+		},
+	}
+	info.ObserveResponseModel("other")
+	assert.Nil(t, info.ResponseModel)
+
+	// Without the opt-out, the same differing declaration is retained.
+	control := &relaycommon.RelayInfo{
+		OriginModelName: "requested",
+		ChannelMeta:     &relaycommon.ChannelMeta{UpstreamModelName: "mapped"},
+	}
+	control.ObserveResponseModel("other")
+	require.NotNil(t, control.ResponseModel)
+	assert.True(t, control.ResponseModel.Mismatch())
+}
