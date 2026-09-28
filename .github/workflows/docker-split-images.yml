@@ -1,0 +1,112 @@
+# Auto-build the split frontend/backend images and publish them to GitHub
+# Container Registry (GHCR). Uses only the built-in GITHUB_TOKEN, so it works
+# on forks without configuring any secret.
+#
+# Published packages (private by default; make them public in the package
+# settings page if servers should pull without credentials):
+#   ghcr.io/<owner>/new-api-backend
+#   ghcr.io/<owner>/new-api-frontend
+#
+# Tag pushes additionally attach `docker load`-able tar.gz bundles to the
+# GitHub Release (the release itself is created by the upstream release.yml).
+name: Publish split images (GHCR)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: Build & push ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: new-api-backend
+            dockerfile: Dockerfile.backend
+          - image: new-api-frontend
+            dockerfile: Dockerfile.frontend
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Stamp VERSION from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: echo "${GITHUB_REF#refs/tags/}" > VERSION
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  release-tarballs:
+    name: Attach image tarballs to release
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull published images and save tarballs
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          OWNER="${{ github.repository_owner }}"
+          mkdir -p dist
+          docker pull "${REGISTRY}/${OWNER}/new-api-backend:${VERSION}"
+          docker pull "${REGISTRY}/${OWNER}/new-api-frontend:${VERSION}"
+          docker save "${REGISTRY}/${OWNER}/new-api-backend:${VERSION}" | gzip > "dist/iioooo-backend-${VERSION}.tar.gz"
+          docker save "${REGISTRY}/${OWNER}/new-api-frontend:${VERSION}" | gzip > "dist/iioooo-frontend-${VERSION}.tar.gz"
+          ls -lh dist
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true
