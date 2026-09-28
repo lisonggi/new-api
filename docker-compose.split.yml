@@ -1,0 +1,53 @@
+# Split (frontend/backend) deployment for iioooo / new-api.
+#
+# Local build + smoke test (from the repo root):
+#   docker compose -f docker-compose.split.yml up -d --build
+# Target server (after `docker load` of both image tars):
+#   docker compose -f docker-compose.split.yml up -d
+#
+# The frontend container is the only entry point: it serves the SPA and
+# reverse-proxies API/relay paths to the backend container.
+name: iioooo-split
+
+services:
+  frontend:
+    image: iioooo-frontend:rc1
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    image: iioooo-backend:rc1
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      - SQL_DSN=postgres://iioooo:CHANGE_ME_DB_PASSWORD@postgres:5432/iioooo
+      - SESSION_SECRET=CHANGE_ME_TO_A_LONG_RANDOM_STRING
+      - GIN_MODE=release
+      - TZ=Asia/Shanghai
+      # - REDIS_CONN_STRING=redis://redis:6379/0
+    volumes:
+      - backend-data:/data
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=iioooo
+      - POSTGRES_PASSWORD=CHANGE_ME_DB_PASSWORD
+      - POSTGRES_DB=iioooo
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  backend-data:
+  pg-data:
