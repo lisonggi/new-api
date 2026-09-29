@@ -1,0 +1,64 @@
+# Production split deployment with automatic HTTPS (Caddy) for a public domain.
+#
+# Secrets come from ./.env (NOT committed):
+#   POSTGRES_PASSWORD=<random>
+#   SESSION_SECRET=<long random>
+#   POSTGRES_USER=iioooo
+#   POSTGRES_DB=iioooo
+#
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Only Caddy publishes ports (80/443). The frontend/backend/postgres stay on the
+# compose network, so the host attack surface is 22 (key-only) + 80/443.
+name: iioooo-hk
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/prod/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+
+  frontend:
+    image: ghcr.io/lisonggi/new-api-frontend:latest
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      - backend
+
+  backend:
+    image: ghcr.io/lisonggi/new-api-backend:latest
+    restart: unless-stopped
+    environment:
+      - SQL_DSN=postgres://${POSTGRES_USER:-iioooo}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-iioooo}
+      - SESSION_SECRET=${SESSION_SECRET:?set SESSION_SECRET in .env}
+      - GIN_MODE=release
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - backend-data:/data
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-iioooo}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      - POSTGRES_DB=${POSTGRES_DB:-iioooo}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+volumes:
+  backend-data:
+  pg-data:
+  caddy-data:
+  caddy-config:

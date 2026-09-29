@@ -1,0 +1,15 @@
+# Caddy reverse proxy with automatic HTTPS for the split deployment.
+# Caddy obtains and renews the certificate automatically (HTTP-01 / TLS-ALPN),
+# redirects HTTP to HTTPS, and proxies everything to the frontend nginx, which
+# serves the SPA and forwards API/relay paths to the backend.
+#
+# flush_interval -1 disables response buffering so SSE streaming from the relay
+# reaches clients immediately.
+
+hk.iioooo.com {
+	encode gzip
+
+	reverse_proxy frontend:80 {
+		flush_interval -1
+	}
+}
