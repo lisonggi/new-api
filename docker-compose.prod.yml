@@ -8,8 +8,10 @@
 #
 #   docker compose -f docker-compose.prod.yml up -d
 #
-# Only Caddy publishes ports (80/443). The frontend/backend/postgres stay on the
-# compose network, so the host attack surface is 22 (key-only) + 80/443.
+# Only Caddy publishes ports (80/443). The frontend/backend/postgres/redis stay
+# on the compose network, so the host attack surface is 22 (key-only) + 80/443.
+# Redis is the shared cache (REDIS_CONN_STRING): token/channel caches plus
+# atomic quota counters; appendonly keeps the counters across restarts.
 name: iioooo-hk
 
 services:
@@ -40,12 +42,16 @@ services:
     environment:
       - SQL_DSN=postgres://${POSTGRES_USER:-iioooo}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-iioooo}
       - SESSION_SECRET=${SESSION_SECRET:?set SESSION_SECRET in .env}
+      - REDIS_CONN_STRING=redis://redis:6379/0
       - GIN_MODE=release
       - TZ=${TZ:-Asia/Shanghai}
     volumes:
       - backend-data:/data
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   postgres:
     image: postgres:15-alpine
@@ -56,9 +62,27 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-iioooo}
     volumes:
       - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iioooo}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
 volumes:
   backend-data:
   pg-data:
+  redis-data:
   caddy-data:
   caddy-config:
