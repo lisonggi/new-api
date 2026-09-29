@@ -40,7 +40,7 @@ services:
     image: ghcr.io/lisonggi/new-api-backend:latest
     restart: unless-stopped
     environment:
-      - SQL_DSN=postgres://${DB_USER:-iioooo}:${DB_PASSWORD:?set DB_PASSWORD in .env}@${DB_HOST:-postgres}:5432/${DB_NAME:-iioooo}
+      - SQL_DSN=postgres://${POSTGRES_USER:-iioooo}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-iioooo}
       - SESSION_SECRET=${SESSION_SECRET:?set SESSION_SECRET in .env}
       - REDIS_CONN_STRING=redis://redis:6379/0
       - GIN_MODE=release
