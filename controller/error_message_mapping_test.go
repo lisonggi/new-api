@@ -52,6 +52,45 @@ func newErrorMessageMappingRelayContext(t *testing.T, path string) (*gin.Context
 	return c, recorder
 }
 
+// TestErrorMessageMappingCoversStoredErrorLogsForUsers verifies the mapping
+// also covers the stored error-log content that customer-facing log views
+// replay: user log queries show the configured replacement while admin log
+// queries keep the stored original for troubleshooting, and a disabled config
+// leaves user views untouched.
+func TestErrorMessageMappingCoversStoredErrorLogsForUsers(t *testing.T) {
+	setupErrorMessageMappingTest(t)
+
+	require.NoError(t, model.LOG_DB.AutoMigrate(&model.Log{}))
+	require.NoError(t, model.DB.Create(&model.User{Id: 7, Username: "log-owner", Group: "default"}).Error)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Set("id", 7)
+	c.Set("username", "log-owner")
+
+	rawContent := "status_code=400, The reasoning_content in the thinking mode must be passed back to the API."
+	model.RecordErrorLog(c, 7, 41, "deepseek-v4.1-flash", "test-token", rawContent, 11, 1, false, "default", model.NewLogOther())
+
+	userLogs, total, err := model.GetUserLogs(7, model.LogTypeError, 0, 0, "", "", 0, 10, "", "", "")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, userLogs, 1)
+	assert.Equal(t, "当前请求格式与模型不兼容，请调整后重试。", userLogs[0].Content)
+
+	adminLogs, adminTotal, err := model.GetAllLogs(model.LogTypeError, 0, 0, "", "", "", 0, 10, 0, "", "", "")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), adminTotal)
+	require.Len(t, adminLogs, 1)
+	assert.Equal(t, rawContent, adminLogs[0].Content)
+
+	_, err = model.SaveErrorMessageMapping(error_mapping.DefaultConfig())
+	require.NoError(t, err)
+	userLogs, _, err = model.GetUserLogs(7, model.LogTypeError, 0, 0, "", "", 0, 10, "", "", "")
+	require.NoError(t, err)
+	require.Len(t, userLogs, 1)
+	assert.Equal(t, rawContent, userLogs[0].Content)
+}
+
 func TestErrorMessageMappingConfigStrictnessAndMatching(t *testing.T) {
 	invalid := []string{
 		``,

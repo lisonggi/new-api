@@ -117,6 +117,13 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
 		logs[i].ChannelName = ""
+		// Error-log content replays the raw upstream message stored by
+		// ProcessChannelError. User-facing views map it through the active
+		// error-message-mapping rules so customers only see the configured
+		// replacement; admin views (GetAllLogs) keep the stored original.
+		if logs[i].Type == LogTypeError {
+			logs[i].Content = MapErrorLogContent(logs[i].Content)
+		}
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser)
 	}
 	assignDisplayLogIds(logs, startIdx)

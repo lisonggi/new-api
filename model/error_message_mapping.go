@@ -78,6 +78,27 @@ func ErrorMessageMappingOptionKey() string {
 	return error_mapping.OptionKey
 }
 
+// MapErrorLogContent applies the active error-message mapping to one stored
+// error-log content string for user-facing display. Matching follows the same
+// semantics as the client-facing relay output: plain substring containment on
+// the first enabled rule, and a disabled config never matches. A miss keeps
+// the original content byte for byte; a match replaces the whole content with
+// the configured replacement so no fragment of the original error leaks.
+func MapErrorLogContent(content string) string {
+	if content == "" {
+		return content
+	}
+	snapshot := loadErrorMessageMappingSnapshot()
+	if snapshot.Matcher == nil {
+		return content
+	}
+	result := snapshot.Matcher.Match(content)
+	if !result.Matched {
+		return content
+	}
+	return result.Message
+}
+
 // SaveErrorMessageMapping validates, persists and publishes the whole config.
 // The snapshot is only replaced after the database transaction commits, so a
 // failed save leaves the previous rules active.
