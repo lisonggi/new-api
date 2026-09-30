@@ -297,6 +297,7 @@ const SENSITIVE_FORM_FIELDS = [
   'force_format',
   'thinking_to_content',
   'reasoning_content_backfill',
+  'responses_reasoning_content_backfill',
   'proxy',
   'http_protocol',
   'http2_connection_shards',
@@ -1934,6 +1935,32 @@ export function ChannelMutateDrawer({
             <FormDescription>
               {t(
                 'Backfill missing reasoning_content on assistant tool-call messages for DeepSeek thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.'
+              )}
+            </FormDescription>
+          </div>
+          <FormControl>
+            <Switch
+              disabled={sensitiveLocked}
+              checked={field.value}
+              onCheckedChange={field.onChange}
+            />
+          </FormControl>
+        </FormItem>
+      )}
+    />
+  )
+
+  const responsesBackfillFields = (
+    <FormField
+      control={form.control}
+      name='responses_reasoning_content_backfill'
+      render={({ field }) => (
+        <FormItem className='flex items-center justify-between px-4 py-3'>
+          <div className='space-y-0.5'>
+            <FormLabel>{t('Responses reasoning content backfill')}</FormLabel>
+            <FormDescription>
+              {t(
+                'Backfill missing reasoning_content on assistant items in a Responses input array for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.'
               )}
             </FormDescription>
           </div>
@@ -4752,6 +4779,7 @@ export function ChannelMutateDrawer({
                 {ollamaOpenAIChatFields}
                 {thinkingFields}
                 {reasoningBackfillFields}
+                {responsesBackfillFields}
                 {ignoreResponseModelMismatchFields}
                 {currentType !== CHANNEL_TYPE_ADVANCED_CUSTOM &&
                   passthroughFields}

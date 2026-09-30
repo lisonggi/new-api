@@ -321,6 +321,7 @@ export const channelFormSchema = z
     force_format: z.boolean().optional(),
     thinking_to_content: z.boolean().optional(),
     reasoning_content_backfill: z.boolean().optional(),
+    responses_reasoning_content_backfill: z.boolean().optional(),
     ignore_response_model_mismatch: z.boolean().optional(),
     model_first_response_timeout: z
       .string()
@@ -524,6 +525,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   force_format: false,
   thinking_to_content: false,
   reasoning_content_backfill: false,
+  responses_reasoning_content_backfill: false,
   ignore_response_model_mismatch: false,
   model_first_response_timeout: '',
   proxy: '',
@@ -571,6 +573,7 @@ export function transformChannelToFormDefaults(
     force_format: false,
     thinking_to_content: false,
     reasoning_content_backfill: false,
+    responses_reasoning_content_backfill: false,
     ignore_response_model_mismatch: false,
     model_first_response_timeout: '',
     proxy: '',
@@ -595,6 +598,8 @@ export function transformChannelToFormDefaults(
         force_format: parsed.force_format || false,
         thinking_to_content: parsed.thinking_to_content || false,
         reasoning_content_backfill: parsed.reasoning_content_backfill === true,
+        responses_reasoning_content_backfill:
+          parsed.responses_reasoning_content_backfill === true,
         ignore_response_model_mismatch:
           parsed.ignore_response_model_mismatch === true,
         model_first_response_timeout:
@@ -737,6 +742,8 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,
     reasoning_content_backfill: formData.reasoning_content_backfill === true,
+    responses_reasoning_content_backfill:
+      formData.responses_reasoning_content_backfill === true,
     ignore_response_model_mismatch:
       formData.ignore_response_model_mismatch === true,
     model_first_response_timeout: parseModelFirstResponseTimeout(

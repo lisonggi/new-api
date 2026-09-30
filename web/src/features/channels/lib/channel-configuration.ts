@@ -63,6 +63,7 @@ const CONFIGURATION_BLOCKS = {
       'force_format',
       'thinking_to_content',
       'reasoning_content_backfill',
+      'responses_reasoning_content_backfill',
       'ignore_response_model_mismatch',
       'pass_through_body_enabled',
       'responses_websocket_enabled',
@@ -160,6 +161,7 @@ export function getChannelConfigurationState(
       (values.type === 1 && values.force_format) ||
       values.thinking_to_content ||
       values.reasoning_content_backfill ||
+      values.responses_reasoning_content_backfill ||
       (values.type !== CHANNEL_TYPE_ADVANCED_CUSTOM &&
         values.pass_through_body_enabled) ||
       (supportsResponsesWebSocket(values.type) &&

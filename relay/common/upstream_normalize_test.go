@@ -30,94 +30,82 @@ func relayInfoForBackfill(upstream, origin string, backfill bool) *RelayInfo {
 	}
 }
 
+func relayInfoForResponsesBackfill(backfill bool) *RelayInfo {
+	return &RelayInfo{
+		ChannelMeta: &ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{ResponsesReasoningContentBackfill: backfill},
+		},
+	}
+}
+
 func TestNormalizeUpstreamRequestChatBackfill(t *testing.T) {
 	tests := []struct {
 		name   string
-		model  string
 		input  string
 		expect string
 	}{
 		{
 			name:   "fills missing reasoning_content on assistant tool call",
-			model:  "deepseek-v4.1-flash",
 			input:  `{"model":"deepseek-v4.1-flash","messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`,
 			expect: `{"model":"deepseek-v4.1-flash","messages":[{"role":"assistant","tool_calls":[{"id":"c1"}],"reasoning_content":""}]}`,
 		},
 		{
 			name:   "preserves existing reasoning_content",
-			model:  "deepseek-v4.1-flash",
 			input:  `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}],"reasoning_content":"real"}]}`,
 			expect: `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}],"reasoning_content":"real"}]}`,
 		},
 		{
 			name:   "keeps an explicit empty reasoning_content untouched",
-			model:  "deepseek-v4.1-flash",
 			input:  `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}],"reasoning_content":""}]}`,
 			expect: `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}],"reasoning_content":""}]}`,
 		},
 		{
 			name:   "replaces null reasoning_content",
-			model:  "deepseek-v4-pro",
 			input:  `{"messages":[{"role":"assistant","reasoning_content":null,"tool_calls":[{"id":"c1"}]}]}`,
 			expect: `{"messages":[{"role":"assistant","reasoning_content":"","tool_calls":[{"id":"c1"}]}]}`,
 		},
 		{
 			name:   "ignores assistant without tool_calls",
-			model:  "deepseek-v4.1-flash",
 			input:  `{"messages":[{"role":"assistant","content":"hi"}]}`,
 			expect: `{"messages":[{"role":"assistant","content":"hi"}]}`,
 		},
 		{
 			name:   "ignores empty tool_calls array",
-			model:  "deepseek-v4.1-flash",
 			input:  `{"messages":[{"role":"assistant","tool_calls":[]}]}`,
 			expect: `{"messages":[{"role":"assistant","tool_calls":[]}]}`,
 		},
 		{
 			name:   "ignores non-assistant tool_calls",
-			model:  "deepseek-v4.1-flash",
 			input:  `{"messages":[{"role":"tool","tool_calls":[{"id":"c1"}]}]}`,
 			expect: `{"messages":[{"role":"tool","tool_calls":[{"id":"c1"}]}]}`,
 		},
 		{
-			name:   "ignores other models",
-			model:  "glm-5.3-flash",
-			input:  `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`,
-			expect: `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`,
-		},
-		{
-			name:   "is case insensitive on the model name",
-			model:  "DeepSeek-V4.1-Flash",
-			input:  `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`,
-			expect: `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}],"reasoning_content":""}]}`,
+			name:   "backfills any model when enabled (no model gating)",
+			input:  `{"model":"glm-5.3-flash","messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`,
+			expect: `{"model":"glm-5.3-flash","messages":[{"role":"assistant","tool_calls":[{"id":"c1"}],"reasoning_content":""}]}`,
 		},
 		{
 			name:   "touches only the matching message",
-			model:  "deepseek-v4.1-flash",
 			input:  `{"messages":[{"role":"user","content":"go"},{"role":"assistant","tool_calls":[{"id":"c1"}]},{"role":"tool","content":"1"}]}`,
 			expect: `{"messages":[{"role":"user","content":"go"},{"role":"assistant","tool_calls":[{"id":"c1"}],"reasoning_content":""},{"role":"tool","content":"1"}]}`,
 		},
 		{
 			name:   "fills every qualifying assistant message",
-			model:  "deepseek-v4.1-flash",
 			input:  `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]},{"role":"tool","content":"1"},{"role":"assistant","tool_calls":[{"id":"c2"}]}]}`,
 			expect: `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}],"reasoning_content":""},{"role":"tool","content":"1"},{"role":"assistant","tool_calls":[{"id":"c2"}],"reasoning_content":""}]}`,
 		},
 		{
-			name:   "leaves native responses input untouched",
-			model:  "deepseek-v4.1-flash",
-			input:  `{"model":"deepseek-v4.1-flash","input":[{"type":"function_call","call_id":"c1","name":"calc","arguments":"{}"}]}`,
-			expect: `{"model":"deepseek-v4.1-flash","input":[{"type":"function_call","call_id":"c1","name":"calc","arguments":"{}"}]}`,
+			name:   "leaves a responses input array untouched when only chat toggle is on",
+			input:  `{"input":[{"type":"message","role":"assistant","content":"hi"}]}`,
+			expect: `{"input":[{"type":"message","role":"assistant","content":"hi"}]}`,
 		},
 		{
 			name:   "leaves body without messages untouched",
-			model:  "deepseek-v4.1-flash",
 			input:  `{"model":"deepseek-v4.1-flash","prompt":"hi"}`,
 			expect: `{"model":"deepseek-v4.1-flash","prompt":"hi"}`,
 		},
 		{
 			name:   "leaves invalid json untouched",
-			model:  "deepseek-v4.1-flash",
 			input:  `{"messages":[`,
 			expect: `{"messages":[`,
 		},
@@ -125,7 +113,64 @@ func TestNormalizeUpstreamRequestChatBackfill(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			info := relayInfoForBackfill(tt.model, "", true)
+			info := relayInfoForBackfill("", "", true)
+			got := NormalizeUpstreamRequest([]byte(tt.input), info)
+			assert.Equal(t, tt.expect, string(got))
+		})
+	}
+}
+
+func TestNormalizeUpstreamRequestResponsesBackfill(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{
+			name:   "fills missing reasoning_content on assistant input item",
+			input:  `{"input":[{"type":"message","role":"assistant","content":"hi"}]}`,
+			expect: `{"input":[{"type":"message","role":"assistant","content":"hi","reasoning_content":""}]}`,
+		},
+		{
+			name:   "preserves existing reasoning_content on assistant item",
+			input:  `{"input":[{"type":"message","role":"assistant","content":"hi","reasoning_content":"real"}]}`,
+			expect: `{"input":[{"type":"message","role":"assistant","content":"hi","reasoning_content":"real"}]}`,
+		},
+		{
+			name:   "replaces null reasoning_content on assistant item",
+			input:  `{"input":[{"type":"message","role":"assistant","reasoning_content":null}]}`,
+			expect: `{"input":[{"type":"message","role":"assistant","reasoning_content":""}]}`,
+		},
+		{
+			name:   "ignores user input items",
+			input:  `{"input":[{"type":"message","role":"user","content":"hi"}]}`,
+			expect: `{"input":[{"type":"message","role":"user","content":"hi"}]}`,
+		},
+		{
+			name:   "ignores function_call and function_call_output items",
+			input:  `{"input":[{"type":"function_call","call_id":"c1","name":"calc","arguments":"{}"},{"type":"function_call_output","call_id":"c1","output":"4"}]}`,
+			expect: `{"input":[{"type":"function_call","call_id":"c1","name":"calc","arguments":"{}"},{"type":"function_call_output","call_id":"c1","output":"4"}]}`,
+		},
+		{
+			name:   "fills every qualifying assistant item",
+			input:  `{"input":[{"type":"message","role":"user","content":"go"},{"type":"message","role":"assistant","content":"a"},{"type":"message","role":"assistant","content":"b"}]}`,
+			expect: `{"input":[{"type":"message","role":"user","content":"go"},{"type":"message","role":"assistant","content":"a","reasoning_content":""},{"type":"message","role":"assistant","content":"b","reasoning_content":""}]}`,
+		},
+		{
+			name:   "leaves a messages array untouched when only responses toggle is on",
+			input:  `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`,
+			expect: `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`,
+		},
+		{
+			name:   "leaves invalid json untouched",
+			input:  `{"input":[`,
+			expect: `{"input":[`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := relayInfoForResponsesBackfill(true)
 			got := NormalizeUpstreamRequest([]byte(tt.input), info)
 			assert.Equal(t, tt.expect, string(got))
 		})
@@ -133,68 +178,53 @@ func TestNormalizeUpstreamRequestChatBackfill(t *testing.T) {
 }
 
 func TestNormalizeUpstreamRequestBackfillIsOptIn(t *testing.T) {
-	input := `{"model":"deepseek-v4.1-flash","messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`
+	chatInput := `{"model":"deepseek-v4.1-flash","messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`
+	responsesInput := `{"input":[{"type":"message","role":"assistant","content":"hi"}]}`
 
-	// Default (off): a channel that did not enable the backfill stays unchanged.
-	assert.Equal(t, input, string(NormalizeUpstreamRequest([]byte(input), relayInfoForBackfill("deepseek-v4.1-flash", "", false))))
+	// Default (off): a channel that did not enable either switch stays unchanged.
+	assert.Equal(t, chatInput, string(NormalizeUpstreamRequest([]byte(chatInput), relayInfoForBackfill("", "", false))))
+	assert.Equal(t, responsesInput, string(NormalizeUpstreamRequest([]byte(responsesInput), relayInfoForResponsesBackfill(false))))
 
 	// Existing relayInfoForUpstream builds a zero-value ChannelSettings, so it
 	// must also leave the request unchanged (opt-in default off).
-	assert.Equal(t, input, string(NormalizeUpstreamRequest([]byte(input), relayInfoForUpstream("deepseek-v4.1-flash", ""))))
+	assert.Equal(t, chatInput, string(NormalizeUpstreamRequest([]byte(chatInput), relayInfoForUpstream("deepseek-v4.1-flash", ""))))
 
-	// Enabled: the backfill applies.
-	assert.Contains(t, string(NormalizeUpstreamRequest([]byte(input), relayInfoForBackfill("deepseek-v4.1-flash", "", true))), `"reasoning_content":""`)
+	// Enabled: each switch applies to its own protocol shape.
+	assert.Contains(t, string(NormalizeUpstreamRequest([]byte(chatInput), relayInfoForBackfill("", "", true))), `"reasoning_content":""`)
+	assert.Contains(t, string(NormalizeUpstreamRequest([]byte(responsesInput), relayInfoForResponsesBackfill(true))), `"reasoning_content":""`)
+}
 
-	// Non-DeepSeek stays unchanged even when the switch is on.
-	other := `{"model":"glm-5.3-flash","messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`
-	assert.Equal(t, other, string(NormalizeUpstreamRequest([]byte(other), relayInfoForBackfill("glm-5.3-flash", "", true))))
+func TestNormalizeUpstreamRequestChatAndResponsesTogglesAreIndependent(t *testing.T) {
+	chatInput := `{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`
+	responsesInput := `{"input":[{"type":"message","role":"assistant","content":"hi"}]}`
+
+	// Chat on, responses off: only the messages array is backfilled.
+	info := relayInfoForBackfill("", "", true)
+	assert.Contains(t, string(NormalizeUpstreamRequest([]byte(chatInput), info)), `"reasoning_content":""`)
+	assert.Equal(t, responsesInput, string(NormalizeUpstreamRequest([]byte(responsesInput), info)))
+
+	// Chat off, responses on: only the input array is backfilled.
+	responsesInfo := relayInfoForResponsesBackfill(true)
+	assert.Equal(t, chatInput, string(NormalizeUpstreamRequest([]byte(chatInput), responsesInfo)))
+	assert.Contains(t, string(NormalizeUpstreamRequest([]byte(responsesInput), responsesInfo)), `"reasoning_content":""`)
 }
 
 func TestNormalizeUpstreamRequestEmptyInputAndNilInfo(t *testing.T) {
 	assert.Equal(t, "", string(NormalizeUpstreamRequest(nil, relayInfoForUpstream("deepseek-v4.1-flash", ""))))
 	assert.Equal(t, "", string(NormalizeUpstreamRequest(nil, relayInfoForBackfill("deepseek-v4.1-flash", "", true))))
+	assert.Equal(t, "", string(NormalizeUpstreamRequest(nil, relayInfoForResponsesBackfill(true))))
 	assert.Equal(t, "", string(NormalizeUpstreamRequest(nil, nil)))
 
 	input := []byte(`{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`)
 	assert.Equal(t, string(input), string(NormalizeUpstreamRequest(input, nil)))
 }
 
-func TestNormalizeUpstreamRequestDoesNotInferUpstreamFromClientAlias(t *testing.T) {
-	// The backfill is enabled so this test still guards the "never infer the
-	// upstream model from the client alias" contract: even with the switch on,
-	// an empty upstream model must not be treated as DeepSeek because the
-	// client alias contains "deepseek".
-	info := relayInfoForBackfill("", "deepseek-v4.1-flash", true)
-	input := []byte(`{"messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`)
-	assert.Equal(t, input, NormalizeUpstreamRequest(input, info))
-}
-
 func TestNormalizeUpstreamRequestNilChannelMetaDoesNotBackfill(t *testing.T) {
-	// A DeepSeek body with a non-nil info but nil ChannelMeta must fall through
-	// the nil guard without panicking and stay unchanged (opt-in default off).
+	// A body with a non-nil info but nil ChannelMeta must fall through the nil
+	// guard without panicking and stay unchanged (opt-in default off).
 	input := []byte(`{"model":"deepseek-v4.1-flash","messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`)
 	info := &RelayInfo{OriginModelName: "deepseek-v4.1-flash"}
 	assert.Equal(t, input, NormalizeUpstreamRequest(input, info))
-}
-
-func TestNormalizeUpstreamRequestUsesFinalModel(t *testing.T) {
-	for _, tc := range []struct {
-		name, upstream, final string
-		wantFill              bool
-	}{
-		{"override away from DeepSeek", "deepseek-v4.1-flash", "other-model", false},
-		{"override to DeepSeek", "other-model", "deepseek-v4.1-flash", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			input := []byte(`{"model":"` + tc.final + `","messages":[{"role":"assistant","tool_calls":[{"id":"c1"}]}]}`)
-			got := NormalizeUpstreamRequest(input, relayInfoForBackfill(tc.upstream, "", true))
-			if tc.wantFill {
-				assert.Contains(t, string(got), `"reasoning_content":""`)
-			} else {
-				assert.Equal(t, input, got)
-			}
-		})
-	}
 }
 
 func TestNormalizeUpstreamRequestRejectsMalformedTrailingJSON(t *testing.T) {

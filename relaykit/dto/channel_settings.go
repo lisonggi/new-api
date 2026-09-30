@@ -18,9 +18,15 @@ type ChannelSettings struct {
 	ForceFormat       bool   `json:"force_format,omitempty"`
 	ThinkingToContent bool   `json:"thinking_to_content,omitempty"`
 	// ReasoningContentBackfill backfills a missing reasoning_content on assistant
-	// tool-call messages before sending upstream, for DeepSeek thinking-mode
-	// upstreams that reject history without it. Opt-in per channel.
+	// tool-call messages in a Chat Completions messages array before sending
+	// upstream, for thinking-mode upstreams that reject history without it.
+	// Opt-in per channel and independent of ResponsesReasoningContentBackfill.
 	ReasoningContentBackfill bool `json:"reasoning_content_backfill,omitempty"`
+	// ResponsesReasoningContentBackfill backfills a missing reasoning_content on
+	// assistant items in a Responses input array before sending upstream, for
+	// thinking-mode upstreams that reject history without it. Opt-in per channel
+	// and independent of ReasoningContentBackfill (which targets Chat messages).
+	ResponsesReasoningContentBackfill bool `json:"responses_reasoning_content_backfill,omitempty"`
 	// IgnoreResponseModelMismatch suppresses the "response model mismatch"
 	// warning when an upstream returns a model name different from the
 	// requested or upstream model (for example when the upstream model name is
