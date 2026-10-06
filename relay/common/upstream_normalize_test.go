@@ -147,9 +147,27 @@ func TestNormalizeUpstreamRequestResponsesBackfill(t *testing.T) {
 			expect: `{"input":[{"type":"message","role":"user","content":"hi"}]}`,
 		},
 		{
-			name:   "ignores function_call and function_call_output items",
+			// A replayed tool call is an assistant turn with no role field; a
+			// thinking-mode upstream rejects the history without reasoning_content.
+			// The tool result (function_call_output) is not an assistant turn.
+			name:   "fills reasoning_content on function_call items but not the tool result",
 			input:  `{"input":[{"type":"function_call","call_id":"c1","name":"calc","arguments":"{}"},{"type":"function_call_output","call_id":"c1","output":"4"}]}`,
-			expect: `{"input":[{"type":"function_call","call_id":"c1","name":"calc","arguments":"{}"},{"type":"function_call_output","call_id":"c1","output":"4"}]}`,
+			expect: `{"input":[{"type":"function_call","call_id":"c1","name":"calc","arguments":"{}","reasoning_content":""},{"type":"function_call_output","call_id":"c1","output":"4"}]}`,
+		},
+		{
+			name:   "fills reasoning_content on custom_tool_call and local_shell_call items",
+			input:  `{"input":[{"type":"custom_tool_call","call_id":"c1","name":"patch"},{"type":"local_shell_call","call_id":"c2"}]}`,
+			expect: `{"input":[{"type":"custom_tool_call","call_id":"c1","name":"patch","reasoning_content":""},{"type":"local_shell_call","call_id":"c2","reasoning_content":""}]}`,
+		},
+		{
+			name:   "preserves an existing reasoning_content on a function_call item",
+			input:  `{"input":[{"type":"function_call","call_id":"c1","reasoning_content":"real"}]}`,
+			expect: `{"input":[{"type":"function_call","call_id":"c1","reasoning_content":"real"}]}`,
+		},
+		{
+			name:   "leaves reasoning items and tool results untouched",
+			input:  `{"input":[{"type":"reasoning","summary":[{"type":"summary_text","text":"t"}]},{"type":"function_call_output","call_id":"c1","output":"4"}]}`,
+			expect: `{"input":[{"type":"reasoning","summary":[{"type":"summary_text","text":"t"}]},{"type":"function_call_output","call_id":"c1","output":"4"}]}`,
 		},
 		{
 			name:   "fills every qualifying assistant item",

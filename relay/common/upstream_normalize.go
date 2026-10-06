@@ -35,38 +35,39 @@ func NormalizeUpstreamRequest(jsonData []byte, info *RelayInfo) []byte {
 		return jsonData
 	}
 	if backfillChat {
-		jsonData = backfillChatToolCallReasoningContent(jsonData)
+		// Chat Completions only needs it on assistant turns that replay tool calls.
+		jsonData = backfillAssistantReasoningContent(jsonData, "messages", true)
 	}
 	if backfillResponses {
-		jsonData = backfillResponsesReasoningContent(jsonData)
+		jsonData = backfillAssistantReasoningContent(jsonData, "input", false)
 	}
 	return jsonData
 }
 
-// backfillChatToolCallReasoningContent fills an empty reasoning_content on
-// assistant messages that replay tool calls without one. It walks the Chat
-// Completions messages array structurally and rewrites only the missing key, so
-// every other field and byte ordering is preserved. Invalid or non-object JSON
-// yields an unmodified body.
-func backfillChatToolCallReasoningContent(jsonData []byte) []byte {
-	messages := gjson.GetBytes(jsonData, "messages")
-	if !messages.IsArray() {
+// backfillAssistantReasoningContent fills a missing or null reasoning_content on
+// assistant turns in the array at arrayPath. It walks the array structurally and
+// rewrites only the missing key, so every other field and byte ordering is
+// preserved. A body without that array yields an unmodified body.
+//
+// Chat Completions (requireToolCalls) restricts the rewrite to assistant turns
+// that replay tool calls, because only those are rejected without reasoning.
+// Responses input items type the tool call instead of the role, so that protocol
+// matches on item type as well (see isAssistantTurn).
+func backfillAssistantReasoningContent(jsonData []byte, arrayPath string, requireToolCalls bool) []byte {
+	array := gjson.GetBytes(jsonData, arrayPath)
+	if !array.IsArray() {
 		return jsonData
 	}
 	result := jsonData
-	messages.ForEach(func(index, message gjson.Result) bool {
-		if message.Get("role").String() != "assistant" {
+	array.ForEach(func(index, turn gjson.Result) bool {
+		if !isAssistantTurn(turn, requireToolCalls) {
 			return true
 		}
-		toolCalls := message.Get("tool_calls")
-		if !toolCalls.IsArray() || len(toolCalls.Array()) == 0 {
-			return true
-		}
-		reasoning := message.Get("reasoning_content")
+		reasoning := turn.Get("reasoning_content")
 		if reasoning.Exists() && reasoning.Type != gjson.Null {
 			return true
 		}
-		if updated, err := sjson.SetBytes(result, "messages."+index.String()+".reasoning_content", ""); err == nil {
+		if updated, err := sjson.SetBytes(result, arrayPath+"."+index.String()+".reasoning_content", ""); err == nil {
 			result = updated
 		}
 		return true
@@ -74,29 +75,35 @@ func backfillChatToolCallReasoningContent(jsonData []byte) []byte {
 	return result
 }
 
-// backfillResponsesReasoningContent fills an empty reasoning_content on
-// assistant items in a Responses input array that replay a turn without one.
-// It walks input[] structurally and rewrites only the missing key, so every
-// other field and byte ordering is preserved. A body without an input array
-// yields an unmodified body.
-func backfillResponsesReasoningContent(jsonData []byte) []byte {
-	input := gjson.GetBytes(jsonData, "input")
-	if !input.IsArray() {
-		return jsonData
+// isAssistantTurn reports whether a replayed turn is assistant-authored and
+// therefore needs reasoning_content present for a thinking-mode upstream.
+//
+// Chat Completions marks assistant turns with role "assistant" and only rejects
+// the ones that replay tool calls.
+//
+// Responses input items are typed rather than role-only: an assistant turn is a
+// message with role assistant, or one of the tool-call item types the model emits
+// (function_call, custom_tool_call, local_shell_call), which carry no role at all.
+// Matching on role alone skips exactly the tool-call turns these upstreams reject,
+// while function_call_output items — the tool result, not an assistant turn — must
+// stay untouched.
+func isAssistantTurn(turn gjson.Result, requireToolCalls bool) bool {
+	if turn.Get("role").String() == "assistant" {
+		if !requireToolCalls {
+			return true
+		}
+		toolCalls := turn.Get("tool_calls")
+		return toolCalls.IsArray() && len(toolCalls.Array()) > 0
 	}
-	result := jsonData
-	input.ForEach(func(index, item gjson.Result) bool {
-		if item.Get("role").String() != "assistant" {
-			return true
-		}
-		reasoning := item.Get("reasoning_content")
-		if reasoning.Exists() && reasoning.Type != gjson.Null {
-			return true
-		}
-		if updated, err := sjson.SetBytes(result, "input."+index.String()+".reasoning_content", ""); err == nil {
-			result = updated
-		}
+	if requireToolCalls {
+		// A Chat Completions assistant turn always carries a role, so a role-less
+		// object in that array is not an assistant turn.
+		return false
+	}
+	switch turn.Get("type").String() {
+	case "function_call", "custom_tool_call", "local_shell_call":
 		return true
-	})
-	return result
+	default:
+		return false
+	}
 }
