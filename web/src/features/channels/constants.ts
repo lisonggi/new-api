@@ -466,6 +466,7 @@ export const FIELD_PLACEHOLDERS = {
   PARAM_OVERRIDE: '{"temperature": 0.7}',
   HEADER_OVERRIDE: '{"X-Custom-Header": "value"}',
   STATUS_CODE_MAPPING: '{"400": "500"}',
+  PROXY: 'socks5://user:pass@host:port',
 } as const
 
 export const FIELD_DESCRIPTIONS = {
@@ -491,6 +492,14 @@ export const FIELD_DESCRIPTIONS = {
   MULTI_KEY_MODE: 'How to select keys: random or sequential polling',
   BATCH_ADD: 'Create multiple channels from multiple keys',
   OPENAI_ORG: 'OpenAI Organization ID (optional)',
+  PROXY:
+    'Network proxy for this channel (supports HTTP, HTTPS, SOCKS5, and SOCKS5H)',
+  HTTP_PROTOCOL:
+    'Auto negotiates HTTP/2 when available. HTTP/1.1 forces multiple keep-alive connections under concurrency.',
+  HTTP2_CONNECTION_SHARDS:
+    'Spread HTTP/2 traffic across multiple reusable connections to the same upstream origin (1-8).',
+  HTTP2_CONNECTION_SHARDS_HTTP1:
+    'HTTP/2 connection shards are unavailable when HTTP/1.1 is selected.',
 } as const
 
 // ============================================================================

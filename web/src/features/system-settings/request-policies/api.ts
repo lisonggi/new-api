@@ -4,13 +4,28 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 export type PolicyConfig = {
   options: Record<string, string>
 }
-export type PolicyDecision = { action: string; reason: string; source: string }
+export type PolicyDecisionAudit = {
+  status?: string
+  upstream_status?: number
+  matched_status?: number
+  retry_error_type?: string
+  diagnostic?: string
+  candidate_rule_id?: string
+}
+export type PolicyDecision = {
+  action: string
+  reason: string
+  source: string
+  rule_id?: string
+  audit?: PolicyDecisionAudit
+}
 export type PolicyEvent = {
   attempt: number
   channel_id?: number
   group?: string
   rule?: string
   status?: number
+  upstream_status?: number
   error_code?: string
   error_source?: string
   elapsed_ms: number

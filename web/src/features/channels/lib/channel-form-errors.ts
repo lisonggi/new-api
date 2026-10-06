@@ -41,6 +41,7 @@ const ADVANCED_SETTINGS_FIELDS = new Set<FieldPath<ChannelFormValues>>([
   'responses_reasoning_content_backfill',
   'ignore_response_model_mismatch',
   'model_first_response_timeout',
+  'error_retry_policy',
   'pass_through_body_enabled',
   'responses_websocket_enabled',
   'proxy',

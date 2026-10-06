@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
+import type { ChannelErrorRetryPolicy } from './lib/channel-error-retry'
+
 // ============================================================================
 // Channel Schema & Types
 // ============================================================================
@@ -91,6 +93,7 @@ export interface ChannelSettings {
     string,
     Array<{ context_tokens: number; timeout_ms: number }>
   >
+  error_retry_policy?: ChannelErrorRetryPolicy
   proxy?: string
   pass_through_body_enabled?: boolean
   responses_websocket_enabled?: boolean
@@ -350,6 +353,9 @@ export interface TagOperationParams {
   model_mapping?: string
   models?: string
   groups?: string
+  proxy?: string
+  http_protocol?: string
+  http2_connection_shards?: number
 }
 
 // ============================================================================

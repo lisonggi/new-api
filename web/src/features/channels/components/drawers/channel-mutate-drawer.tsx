@@ -167,6 +167,8 @@ import {
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   CHANNEL_TYPE_ADVANCED_CUSTOM,
+  HTTP_PROTOCOL_AUTO,
+  HTTP_PROTOCOL_HTTP1,
   channelFormSchema,
   channelsQueryKeys,
   getAdvancedCustomStats,
@@ -208,6 +210,10 @@ import {
 import type { Channel } from '../../types'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelQuickOptions } from '../channel-quick-options'
+import {
+  HttpProtocolSelect,
+  HttpShardsSelect,
+} from '../channel-transport-fields'
 import { ChannelTypeLogo } from '../channel-type-badge'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
@@ -222,6 +228,7 @@ import {
   type PassthroughKind,
 } from '../dialogs/passthrough-warning-dialog'
 import { StatusCodeRiskDialog } from '../dialogs/status-code-risk-dialog'
+import { ErrorRetryPolicyEditor } from '../error-retry-policy/error-retry-policy-editor'
 import {
   ModelMappingBatchDialog,
   type ModelMappingBatchResult,
@@ -298,6 +305,7 @@ const SENSITIVE_FORM_FIELDS = [
   'thinking_to_content',
   'reasoning_content_backfill',
   'responses_reasoning_content_backfill',
+  'error_retry_policy',
   'proxy',
   'http_protocol',
   'http2_connection_shards',
@@ -1804,13 +1812,9 @@ export function ChannelMutateDrawer({
         <FormItem>
           <FormLabel>{t('Proxy Address')}</FormLabel>
           <FormControl>
-            <Input placeholder={t('socks5://user:pass@host:port')} {...field} />
+            <Input placeholder={t(FIELD_PLACEHOLDERS.PROXY)} {...field} />
           </FormControl>
-          <FormDescription>
-            {t(
-              'Network proxy for this channel (supports HTTP, HTTPS, SOCKS5, and SOCKS5H)'
-            )}
-          </FormDescription>
+          <FormDescription>{t(FIELD_DESCRIPTIONS.PROXY)}</FormDescription>
           <FormMessage />
         </FormItem>
       )}
@@ -2140,46 +2144,23 @@ export function ChannelMutateDrawer({
       render={({ field }) => (
         <FormItem>
           <FormLabel>{t('HTTP Protocol')}</FormLabel>
-          <Select
-            disabled={sensitiveLocked}
-            items={[
-              {
-                value: 'auto',
-                label: t('Auto'),
-              },
-              {
-                value: 'http1',
-                label: t('HTTP/1.1'),
-              },
-            ]}
-            value={field.value || 'auto'}
-            onValueChange={(value) => {
-              const nextProtocol = value === 'http1' ? 'http1' : 'auto'
-              field.onChange(nextProtocol)
-              if (nextProtocol === 'http1') {
-                form.setValue('http2_connection_shards', 1, {
-                  shouldDirty: true,
-                  shouldValidate: true,
-                })
-              }
-            }}
-          >
-            <FormControl>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-            </FormControl>
-            <SelectContent alignItemWithTrigger={false}>
-              <SelectGroup>
-                <SelectItem value='auto'>{t('Auto')}</SelectItem>
-                <SelectItem value='http1'>{t('HTTP/1.1')}</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+          <FormControl>
+            <HttpProtocolSelect
+              value={field.value || HTTP_PROTOCOL_AUTO}
+              onValueChange={(value) => {
+                field.onChange(value)
+                if (value === HTTP_PROTOCOL_HTTP1) {
+                  form.setValue('http2_connection_shards', 1, {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  })
+                }
+              }}
+              disabled={sensitiveLocked}
+            />
+          </FormControl>
           <FormDescription>
-            {t(
-              'Auto negotiates HTTP/2 when available. HTTP/1.1 forces multiple keep-alive connections under concurrency.'
-            )}
+            {t(FIELD_DESCRIPTIONS.HTTP_PROTOCOL)}
           </FormDescription>
           <FormMessage />
         </FormItem>
@@ -2192,45 +2173,23 @@ export function ChannelMutateDrawer({
       control={form.control}
       name='http2_connection_shards'
       render={({ field }) => {
-        const http1Selected = currentHttpProtocol === 'http1'
-        const shardItems = Array.from({ length: 8 }, (_, index) => {
-          const value = String(index + 1)
-          return { value, label: value }
-        })
+        const http1Selected = currentHttpProtocol === HTTP_PROTOCOL_HTTP1
         return (
           <FormItem>
             <FormLabel>{t('HTTP/2 Connection Shards')}</FormLabel>
-            <Select
-              items={shardItems}
-              value={String(field.value || 1)}
-              disabled={sensitiveLocked || http1Selected}
-              onValueChange={(value) => {
-                field.onChange(Number(value))
-              }}
-            >
-              <FormControl>
-                <SelectTrigger disabled={sensitiveLocked || http1Selected}>
-                  <SelectValue />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent alignItemWithTrigger={false}>
-                <SelectGroup>
-                  {shardItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+            <FormControl>
+              <HttpShardsSelect
+                value={String(field.value || 1)}
+                onValueChange={(value) => {
+                  field.onChange(Number(value))
+                }}
+                disabled={sensitiveLocked || http1Selected}
+              />
+            </FormControl>
             <FormDescription>
               {http1Selected
-                ? t(
-                    'HTTP/2 connection shards are unavailable when HTTP/1.1 is selected.'
-                  )
-                : t(
-                    'Spread HTTP/2 traffic across multiple reusable connections to the same upstream origin (1-8).'
-                  )}
+                ? t(FIELD_DESCRIPTIONS.HTTP2_CONNECTION_SHARDS_HTTP1)
+                : t(FIELD_DESCRIPTIONS.HTTP2_CONNECTION_SHARDS)}
             </FormDescription>
             <FormMessage />
           </FormItem>
@@ -2643,6 +2602,47 @@ export function ChannelMutateDrawer({
                 textareaRef={field.ref}
                 disabled={sensitiveLocked || isSubmitting}
                 placeholder='{"model":[{"context_tokens":200000,"timeout_ms":3000}]}'
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </div>
+  )
+
+  const errorRetryFields = (
+    <div
+      role='group'
+      aria-label={t('Error retry judgment')}
+      className={channelConfigurationBlockClassName(
+        configuration.blocks.errorRetryPolicy,
+        'space-y-4'
+      )}
+    >
+      <CardHeading
+        status={configuration.blocks.errorRetryPolicy}
+        title={t('Error retry judgment')}
+        icon={<Route className='size-4' />}
+      />
+      <FormField
+        control={form.control}
+        name='error_retry_policy'
+        render={({ field }) => (
+          <FormItem className='space-y-3'>
+            <div className='space-y-1'>
+              <FormLabel>{t('Error retry judgment')}</FormLabel>
+              <FormDescription>
+                {t(
+                  'Classify upstream HTTP errors as retryable or final for this channel. A miss inherits the global decision.'
+                )}
+              </FormDescription>
+            </div>
+            <FormControl>
+              <ErrorRetryPolicyEditor
+                value={field.value || ''}
+                onChange={field.onChange}
+                disabled={sensitiveLocked || isSubmitting}
               />
             </FormControl>
             <FormMessage />
@@ -4748,6 +4748,7 @@ export function ChannelMutateDrawer({
           <>
             {redirectPanelActive ? redirectPanelNotice : modelMappingFields}
             {firstResponseTimeoutFields}
+            {errorRetryFields}
             {routingFields}
           </>
         }

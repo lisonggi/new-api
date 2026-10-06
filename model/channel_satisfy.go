@@ -68,25 +68,34 @@ func isChannelIDInList(list []int, channelID int) bool {
 	return slices.Contains(list, channelID)
 }
 
+// candidateChannelIDs returns the enabled candidate channel IDs for a group and
+// model after applying the request filters, trying the exact model name first and
+// then the normalized routing name. Callers must hold channelSyncLock.
+func candidateChannelIDs(group, model string, filters []dto.ChannelFilter) []int {
+	channels, _ := filterCandidateIDs(group2model2channels[group][model], model, filters)
+	if len(channels) > 0 {
+		return channels
+	}
+	normalized := ratio_setting.RoutingMatchModelName(model)
+	if normalized == "" || normalized == model {
+		return channels
+	}
+	channels, _ = filterCandidateIDs(group2model2channels[group][normalized], model, filters)
+	return channels
+}
+
 // CountSatisfiedChannels returns the number of enabled candidate channels for a
-// group+model pair after applying the request filters, mirroring the candidate
-// discovery in GetRandomSatisfiedChannel (exact model name, then the normalized
-// routing name). It is read-only and never advances selection state. Used to decide
-// whether a per-model first-byte timeout may safely fail the current channel.
+// group+model pair after applying the request filters, using the same candidate
+// discovery as GetRandomSatisfiedChannel. It is read-only and never advances
+// selection state. Used to decide whether a per-model first-byte timeout may
+// safely fail the current channel.
 func CountSatisfiedChannels(group, model string, filters []dto.ChannelFilter) int {
 	if !common.MemoryCacheEnabled {
 		return countSatisfiedChannelsDB(group, model, filters)
 	}
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
-	channels, _ := filterCandidateIDs(group2model2channels[group][model], model, filters)
-	if len(channels) == 0 {
-		normalized := ratio_setting.RoutingMatchModelName(model)
-		if normalized != "" && normalized != model {
-			channels, _ = filterCandidateIDs(group2model2channels[group][normalized], model, filters)
-		}
-	}
-	return len(channels)
+	return len(candidateChannelIDs(group, model, filters))
 }
 
 func countSatisfiedChannelsDB(group, model string, filters []dto.ChannelFilter) int {

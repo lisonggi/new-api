@@ -862,7 +862,7 @@ func DisableChannelByTag(tag string) error {
 	return err
 }
 
-func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, paramOverride *string, headerOverride *string) error {
+func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, paramOverride *string, headerOverride *string, proxy *string, httpProtocol *string, http2ConnectionShards *int) error {
 	updateData := Channel{}
 	shouldReCreateAbilities := false
 	updatedTag := tag
@@ -895,9 +895,57 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 		updateData.HeaderOverride = headerOverride
 	}
 
+	// Collect the target ids before the bulk update: renaming the tag (including
+	// an empty new_tag, or merging into a tag that already exists) would
+	// otherwise re-select unrelated rows for the settings patch. Every channel is
+	// re-read after the update so a setting rewrite stays consistent with the new
+	// tag and the other batch fields, and so the row keeps every column (the
+	// credential included) that GetSetting can persist through Save.
+	var settingTargetIds []int
+	if proxy != nil || httpProtocol != nil || http2ConnectionShards != nil {
+		if err := DB.Model(&Channel{}).Where("tag = ?", tag).Pluck("id", &settingTargetIds).Error; err != nil {
+			return err
+		}
+	}
+
 	err := DB.Model(&Channel{}).Where("tag = ?", tag).Updates(updateData).Error
 	if err != nil {
 		return err
+	}
+	for _, channelId := range settingTargetIds {
+		var channel Channel
+		if err := DB.First(&channel, channelId).Error; err != nil {
+			return err
+		}
+		setting := channel.GetSetting()
+		if proxy != nil {
+			setting.Proxy = *proxy
+		}
+		if httpProtocol != nil {
+			setting.HTTPProtocol = *httpProtocol
+		}
+		if http2ConnectionShards != nil {
+			setting.HTTP2ConnectionShards = *http2ConnectionShards
+			if *http2ConnectionShards > 1 {
+				// More than one shard only means anything for HTTP/2, so it
+				// also lifts an HTTP/1.1 pin instead of storing a
+				// contradictory combination.
+				setting.HTTPProtocol = ""
+			}
+		}
+		if setting.HTTPProtocol == dto.HTTPProtocolHTTP1 {
+			// http1 and multiple HTTP/2 shards are mutually exclusive.
+			setting.HTTP2ConnectionShards = 1
+		}
+		if err := channel.SetSetting(setting); err != nil {
+			return err
+		}
+		if channel.Setting == nil {
+			return fmt.Errorf("failed to encode setting for channel %d", channel.Id)
+		}
+		if err := DB.Model(&Channel{}).Where("id = ?", channel.Id).Update("setting", *channel.Setting).Error; err != nil {
+			return err
+		}
 	}
 	if shouldReCreateAbilities {
 		channels, err := GetChannelsByTag(updatedTag, false, false)
@@ -1006,7 +1054,11 @@ func SearchTags(keyword string, group string, model string, idSort bool) ([]*str
 func (channel *Channel) ValidateSettings() error {
 	channelParams := &dto.ChannelSettings{}
 	if channel.Setting != nil && *channel.Setting != "" {
-		err := common.Unmarshal([]byte(*channel.Setting), channelParams)
+		rawSetting := []byte(*channel.Setting)
+		if err := validateChannelErrorRetryPolicy(rawSetting); err != nil {
+			return err
+		}
+		err := common.Unmarshal(rawSetting, channelParams)
 		if err != nil {
 			return err
 		}
@@ -1051,26 +1103,123 @@ func (channel *Channel) ValidateSettings() error {
 	return nil
 }
 
+// validateChannelErrorRetryPolicy enforces the strict schema and byte budgets
+// of the optional error_retry_policy field before a channel setting is stored.
+// It rejects rather than truncates so the persisted value always re-parses.
+func validateChannelErrorRetryPolicy(rawSetting []byte) error {
+	_, present, rawPolicy, verr := dto.ParseChannelErrorRetryPolicyInSettingWithRaw(rawSetting)
+	if verr != nil {
+		return fmt.Errorf("invalid error_retry_policy: %w", verr)
+	}
+	if !present {
+		// The byte budgets only constrain settings that carry the new field.
+		return nil
+	}
+	if len(rawSetting) > dto.MaxChannelSettingBytes {
+		return fmt.Errorf("channel setting exceeds %d bytes", dto.MaxChannelSettingBytes)
+	}
+	if len(rawPolicy) > dto.MaxChannelErrorRetryPolicyBytes {
+		return fmt.Errorf("error_retry_policy exceeds %d bytes", dto.MaxChannelErrorRetryPolicyBytes)
+	}
+	return nil
+}
+
+// channelSettingsEnvelope decodes the stored setting with the legacy DTO while
+// capturing error_retry_policy as raw bytes. The outer field is shallower than
+// the embedded typed field, so every case-variant spelling the JSON decoder
+// would bind to the new field is captured here instead of breaking the legacy
+// decode.
+type channelSettingsEnvelope struct {
+	dto.ChannelSettings
+	ErrorRetryPolicy json.RawMessage `json:"error_retry_policy"`
+}
+
 func (channel *Channel) GetSetting() dto.ChannelSettings {
 	setting := dto.ChannelSettings{}
-	if channel.Setting != nil && *channel.Setting != "" {
-		err := common.Unmarshal([]byte(*channel.Setting), &setting)
-		if err != nil {
-			common.SysLog(fmt.Sprintf("failed to unmarshal setting: channel_id=%d, error=%v", channel.Id, err))
-			channel.Setting = nil // 清空设置以避免后续错误
-			_ = channel.Save()    // 保存修改
-		}
+	if channel.Setting == nil || *channel.Setting == "" {
+		return setting
 	}
+	rawSetting := []byte(*channel.Setting)
+	envelope := channelSettingsEnvelope{}
+	if err := common.Unmarshal(rawSetting, &envelope); err != nil {
+		common.SysLog(fmt.Sprintf("failed to unmarshal setting: channel_id=%d, error=%v", channel.Id, err))
+		channel.Setting = nil // 清空设置以避免后续错误
+		_ = channel.Save()    // 保存修改
+		return setting
+	}
+	setting = envelope.ChannelSettings
+	policy, diagnostic, rawPolicy := parseStoredErrorRetryPolicy(rawSetting)
+	setting.ErrorRetryPolicy = policy
+	setting.ErrorRetryPolicyDiagnostic = diagnostic
+	setting.ErrorRetryPolicyRaw = rawPolicy
 	return setting
 }
 
-func (channel *Channel) SetSetting(setting dto.ChannelSettings) {
+// parseStoredErrorRetryPolicy isolates the new policy so an invalid stored
+// value only disables the policy and never fails decoding of unrelated legacy
+// settings. The returned raw bytes preserve an invalid policy across internal
+// read-modify-write paths.
+func parseStoredErrorRetryPolicy(rawSetting []byte) (*dto.ChannelErrorRetryPolicy, string, json.RawMessage) {
+	if len(rawSetting) > dto.MaxChannelSettingBytes {
+		rawPolicy, present, _ := dto.ChannelErrorRetryPolicyRawInSetting(rawSetting)
+		if !present {
+			// No policy: the whole-setting budget only applies when the new
+			// field is present, so legacy oversize settings stay valid.
+			return nil, "", nil
+		}
+		return nil, "error_retry_policy: setting_too_large", rawPolicy
+	}
+	policy, present, rawPolicy, verr := dto.ParseChannelErrorRetryPolicyInSettingWithRaw(rawSetting)
+	if verr != nil {
+		// The raw value preserves a stored-but-invalid policy across internal
+		// read-modify-write paths.
+		return nil, verr.Error(), rawPolicy
+	}
+	if !present {
+		return nil, "", nil
+	}
+	if len(rawPolicy) > dto.MaxChannelErrorRetryPolicyBytes {
+		return nil, "error_retry_policy: too_large", rawPolicy
+	}
+	return policy, "", nil
+}
+
+// SetSetting replaces the channel's stored setting JSON. It reports an error,
+// and leaves the previous setting untouched, when the incoming setting cannot be
+// encoded faithfully; a caller that ignored that would persist a stale setting
+// while reporting success to the administrator.
+func (channel *Channel) SetSetting(setting dto.ChannelSettings) error {
+	rawPolicy := setting.ErrorRetryPolicyRaw
+	diagnostic := setting.ErrorRetryPolicyDiagnostic
+	setting.ErrorRetryPolicyRaw = nil
+	setting.ErrorRetryPolicyDiagnostic = ""
+	if diagnostic != "" && setting.ErrorRetryPolicy == nil &&
+		channel.Setting != nil && *channel.Setting != "" &&
+		dto.ChannelErrorRetryPolicyFieldAmbiguous([]byte(*channel.Setting)) {
+		// A duplicated or differently cased stored field cannot be reproduced
+		// faithfully by re-encoding, so refuse the internal read-modify-write
+		// rather than rewriting the last duplicate into a valid policy.
+		common.SysLog(fmt.Sprintf("refusing to rewrite channel setting with a duplicated or non-canonical error_retry_policy: channel_id=%d", channel.Id))
+		return fmt.Errorf("channel %d setting carries a duplicated or non-canonical error_retry_policy; fix that field before changing other settings", channel.Id)
+	}
 	settingBytes, err := common.Marshal(setting)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to marshal setting: channel_id=%d, error=%v", channel.Id, err))
-		return
+		return fmt.Errorf("failed to encode setting for channel %d: %w", channel.Id, err)
+	}
+	if len(rawPolicy) > 0 && setting.ErrorRetryPolicy == nil {
+		// Preserve a stored-but-invalid policy so a nil runtime value is not
+		// mistaken for a user deletion during an internal write-back.
+		var payload map[string]json.RawMessage
+		if err := common.Unmarshal(settingBytes, &payload); err == nil {
+			payload["error_retry_policy"] = rawPolicy
+			if merged, err := common.Marshal(payload); err == nil {
+				settingBytes = merged
+			}
+		}
 	}
 	channel.Setting = common.GetPointer[string](string(settingBytes))
+	return nil
 }
 
 func (channel *Channel) GetOtherSettings() dto.ChannelOtherSettings {

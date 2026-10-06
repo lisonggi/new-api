@@ -16,11 +16,15 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/dto"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -216,4 +220,130 @@ func TestRequestPolicyRoutingDatabaseMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestChannelErrorRetryPolicyControlsRealRelayAttempts runs the real relay loop
+// against a mock upstream and proves a channel policy decides the number of
+// upstream attempts, while the global budget, a miss and a token pin keep their
+// original effect.
+func TestChannelErrorRetryPolicyControlsRealRelayAttempts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	user, token := setupResponsesWSRequestTest(t)
+
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		switch key {
+		case "billing_setting.billing_mode", "billing_setting.billing_expr", "group_ratio_setting.group_ratio":
+			saved[key] = value
+		}
+		return nil
+	}))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+	expressions, err := common.Marshal(map[string]string{"retry-policy-test": `tier("request", fixed(0.002))`})
+	require.NoError(t, err)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":    `{"retry-policy-test":"tiered_expr"}`,
+		"billing_setting.billing_expr":    string(expressions),
+		"group_ratio_setting.group_ratio": `{"default":1}`,
+	}))
+	previousCountToken, previousQuotaPerUnit := constant.CountToken, common.QuotaPerUnit
+	previousAutoDisable := common.AutomaticDisableChannelEnabled
+	constant.CountToken, common.QuotaPerUnit = false, 500000
+	common.AutomaticDisableChannelEnabled = false
+	t.Cleanup(func() {
+		constant.CountToken, common.QuotaPerUnit = previousCountToken, previousQuotaPerUnit
+		common.AutomaticDisableChannelEnabled = previousAutoDisable
+	})
+	require.NoError(t, model.DB.Model(user).Updates(map[string]any{"quota": 100000000, "setting": `{"billing_preference":"wallet_only"}`}).Error)
+	require.NoError(t, model.DB.Model(token).Update("remain_quota", 100000000).Error)
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}))
+
+	var attempts atomic.Int32
+	var upstreamMessage atomic.Value
+	upstreamMessage.Store("temporary supplier fault")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintf(w, `{"error":{"message":%q,"type":"server_error","code":"temporary"}}`, upstreamMessage.Load().(string))
+	}))
+	t.Cleanup(upstream.Close)
+
+	baseURL := upstream.URL
+	channel := &model.Channel{Name: "retry-policy", Key: "test-only", Status: common.ChannelStatusEnabled, Type: constant.ChannelTypeOpenAI, Group: "default", Models: "retry-policy-test", BaseURL: &baseURL}
+	require.NoError(t, model.DB.Create(channel).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{ChannelId: channel.Id, Model: "retry-policy-test", Group: "default", Enabled: true}).Error)
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Where("channel_id = ?", channel.Id).Delete(&model.Ability{}).Error)
+		require.NoError(t, model.DB.Delete(channel).Error)
+	})
+	model.InitChannelCache()
+
+	engine := gin.New()
+	engine.POST("/v1/chat/completions", middleware.TokenAuth(), func(c *gin.Context) {
+		if c.GetHeader("X-Test-Pin") == "single-attempt" {
+			service.GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: channel.Id, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
+		}
+		c.Next()
+	}, middleware.Distribute(), func(c *gin.Context) {
+		Relay(c, types.RelayFormatOpenAI)
+	})
+	gateway := httptest.NewServer(engine)
+	t.Cleanup(gateway.Close)
+
+	setPolicy := func(policy *kitdto.ChannelErrorRetryPolicy) {
+		t.Helper()
+		channel.SetSetting(kitdto.ChannelSettings{ErrorRetryPolicy: policy})
+		require.NoError(t, channel.ValidateSettings())
+		require.NoError(t, model.DB.Model(channel).Update("setting", *channel.Setting).Error)
+	}
+	call := func(pin string) int {
+		t.Helper()
+		attempts.Store(0)
+		request, err := http.NewRequest(http.MethodPost, gateway.URL+"/v1/chat/completions", strings.NewReader(`{"model":"retry-policy-test","messages":[{"role":"user","content":"hi"}]}`))
+		require.NoError(t, err)
+		request.Header.Set("Authorization", "Bearer sk-"+token.Key)
+		request.Header.Set("Content-Type", "application/json")
+		if pin != "" {
+			request.Header.Set("X-Test-Pin", pin)
+		}
+		response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+		require.NoError(t, err)
+		_ = response.Body.Close()
+		return int(attempts.Load())
+	}
+	retryRule := kitdto.ChannelErrorRetryRule{
+		ID: "retry-temporary", Enabled: true, Action: kitdto.ChannelErrorRetryActionRetry, StatusCodes: []int{http.StatusBadRequest},
+		Conditions: []kitdto.ChannelErrorRetryCondition{{Field: kitdto.ChannelErrorRetryFieldMessage, Operator: kitdto.ChannelErrorRetryOperatorContains, Value: "temporary supplier fault"}},
+	}
+
+	previousRetries := common.RetryTimes
+	common.RetryTimes = 1
+	t.Cleanup(func() { common.RetryTimes = previousRetries })
+
+	t.Run("retry rule drives a second attempt despite the global status rule", func(t *testing.T) {
+		upstreamMessage.Store("temporary supplier fault")
+		setPolicy(&kitdto.ChannelErrorRetryPolicy{Enabled: true, Rules: []kitdto.ChannelErrorRetryRule{retryRule}})
+		assert.Equal(t, 2, call(""))
+	})
+
+	t.Run("stop rule ends after the first attempt", func(t *testing.T) {
+		upstreamMessage.Store("unsupported parameter")
+		setPolicy(&kitdto.ChannelErrorRetryPolicy{Enabled: true, Rules: []kitdto.ChannelErrorRetryRule{{
+			ID: "stop-parameter", Enabled: true, Action: kitdto.ChannelErrorRetryActionStop, StatusCodes: []int{http.StatusBadRequest},
+			Conditions: []kitdto.ChannelErrorRetryCondition{{Field: kitdto.ChannelErrorRetryFieldMessage, Operator: kitdto.ChannelErrorRetryOperatorContains, Value: "unsupported parameter"}},
+		}}})
+		assert.Equal(t, 1, call(""))
+	})
+
+	t.Run("miss keeps the legacy single attempt for status 400", func(t *testing.T) {
+		upstreamMessage.Store("unrelated supplier fault")
+		assert.Equal(t, 1, call(""))
+	})
+
+	t.Run("retry rule cannot bypass the token single-attempt pin", func(t *testing.T) {
+		upstreamMessage.Store("temporary supplier fault")
+		setPolicy(&kitdto.ChannelErrorRetryPolicy{Enabled: true, Rules: []kitdto.ChannelErrorRetryRule{retryRule}})
+		assert.Equal(t, 1, call("single-attempt"))
+	})
 }

@@ -858,3 +858,186 @@ func TestChannelSettingsValidateFirstResponseTimeout(t *testing.T) {
 		})
 	}
 }
+
+func TestParseChannelErrorRetryPolicyInSettingAcceptsValidPolicy(t *testing.T) {
+	raw := `{"proxy":"http://127.0.0.1:8080","error_retry_policy":{"enabled":true,"rules":[` +
+		`{"id":"r1","name":"overloaded","enabled":true,"action":"retry","status_codes":[429,503],` +
+		`"conditions":[{"field":"message","operator":"contains","value":"overloaded","case_sensitive":false}]},` +
+		`{"id":"r2","enabled":true,"action":"stop","conditions":[{"field":"code","operator":"equals","value":"content_filter","case_sensitive":true}]}` +
+		`]}}`
+
+	policy, present, verr := ParseChannelErrorRetryPolicyInSetting([]byte(raw))
+	require.Nil(t, verr)
+	require.True(t, present)
+	require.NotNil(t, policy)
+	assert.True(t, policy.Enabled)
+	require.Len(t, policy.Rules, 2)
+	assert.Equal(t, "r1", policy.Rules[0].ID)
+	assert.Equal(t, ChannelErrorRetryActionRetry, policy.Rules[0].Action)
+	assert.Equal(t, []int{429, 503}, policy.Rules[0].StatusCodes)
+	require.Len(t, policy.Rules[0].Conditions, 1)
+	assert.True(t, policy.Rules[1].Enabled)
+	assert.Equal(t, ChannelErrorRetryActionStop, policy.Rules[1].Action)
+}
+
+func TestParseChannelErrorRetryPolicyInSettingInheritsWhenAbsentOrNull(t *testing.T) {
+	for name, raw := range map[string]string{
+		"absent": `{"proxy":"http://127.0.0.1:8080"}`,
+		"null":   `{"error_retry_policy":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			policy, present, verr := ParseChannelErrorRetryPolicyInSetting([]byte(raw))
+			require.Nil(t, verr)
+			require.False(t, present)
+			require.Nil(t, policy)
+		})
+	}
+}
+
+func TestParseChannelErrorRetryPolicyInSettingAcceptsEmptyObjectAsInherit(t *testing.T) {
+	policy, present, verr := ParseChannelErrorRetryPolicyInSetting([]byte(`{"error_retry_policy":{}}`))
+	require.Nil(t, verr)
+	require.True(t, present)
+	require.NotNil(t, policy)
+	assert.False(t, policy.Enabled)
+	assert.Empty(t, policy.Rules)
+}
+
+func TestParseChannelErrorRetryPolicyInSettingRejectsInvalid(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "non-canonical key",
+			raw:  `{"ERROR_RETRY_POLICY":{"enabled":true}}`,
+			want: "non_canonical_field",
+		},
+		{
+			name: "duplicate canonical key",
+			raw:  `{"error_retry_policy":{"enabled":true},"error_retry_policy":{"enabled":false}}`,
+			want: "non_canonical_field",
+		},
+		{
+			name: "unknown top-level policy field",
+			raw:  `{"error_retry_policy":{"enabled":true,"mode":"x"}}`,
+			want: "unknown_field",
+		},
+		{
+			name: "null enabled",
+			raw:  `{"error_retry_policy":{"enabled":null}}`,
+			want: "not_bool",
+		},
+		{
+			name: "policy not object",
+			raw:  `{"error_retry_policy":"retry"}`,
+			want: "not_object",
+		},
+		{
+			name: "rule missing action",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","status_codes":[500]}]}}`,
+			want: "action",
+		},
+		{
+			name: "enabled policy carries rules without saying whether it is enabled",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","enabled":true,"action":"retry","status_codes":[500]}]}}`,
+			want: "required",
+		},
+		{
+			name: "invalid action",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","action":"inherit","status_codes":[500]}]}}`,
+			want: "invalid_value",
+		},
+		{
+			name: "empty matcher",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","action":"retry"}]}}`,
+			want: "empty_matcher",
+		},
+		{
+			name: "status out of range",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","action":"retry","status_codes":[600]}]}}`,
+			want: "invalid_value",
+		},
+		{
+			name: "non-integer status",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","action":"retry","status_codes":[429.5]}]}}`,
+			want: "invalid_value",
+		},
+		{
+			name: "duplicate status",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","action":"retry","status_codes":[429,429]}]}}`,
+			want: "duplicate",
+		},
+		{
+			name: "duplicate rule id",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","action":"retry","status_codes":[500]},{"id":"r1","action":"stop","status_codes":[400]}]}}`,
+			want: "duplicate",
+		},
+		{
+			name: "invalid rule id",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"bad id","action":"retry","status_codes":[500]}]}}`,
+			want: "invalid_value",
+		},
+		{
+			name: "unknown condition operator",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","action":"retry","conditions":[{"field":"message","operator":"regex","value":"x"}]}]}}`,
+			want: "invalid_value",
+		},
+		{
+			name: "unknown condition field",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","action":"retry","conditions":[{"field":"body","operator":"equals","value":"x"}]}]}}`,
+			want: "invalid_value",
+		},
+		{
+			name: "blank condition value",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","action":"retry","conditions":[{"field":"message","operator":"equals","value":"   "}]}]}}`,
+			want: "invalid_value",
+		},
+		{
+			name: "null condition value",
+			raw:  `{"error_retry_policy":{"rules":[{"id":"r1","action":"retry","conditions":[{"field":"message","operator":"equals","value":null}]}]}}`,
+			want: "not_string",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy, present, verr := ParseChannelErrorRetryPolicyInSetting([]byte(tt.raw))
+			require.NotNil(t, verr)
+			require.False(t, present)
+			require.Nil(t, policy)
+			assert.Contains(t, verr.Error(), tt.want)
+		})
+	}
+}
+
+func TestParseChannelErrorRetryPolicyInSettingRejectsDuplicateKeysInSubtree(t *testing.T) {
+	raw := `{"error_retry_policy":{"enabled":true,"enabled":false}}`
+	_, _, verr := ParseChannelErrorRetryPolicyInSetting([]byte(raw))
+	require.NotNil(t, verr)
+	assert.Contains(t, verr.Error(), "invalid_json")
+}
+
+func TestChannelErrorRetryPolicyTypedRoundTrip(t *testing.T) {
+	settings := ChannelSettings{
+		ErrorRetryPolicy: &ChannelErrorRetryPolicy{
+			Enabled: true,
+			Rules: []ChannelErrorRetryRule{{
+				ID:          "rule_a",
+				Enabled:     true,
+				Action:      ChannelErrorRetryActionRetry,
+				StatusCodes: []int{429},
+			}},
+		},
+	}
+	encoded, err := json.Marshal(settings)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"error_retry_policy"`)
+	assert.NotContains(t, string(encoded), "error_retry_policy_diagnostic")
+
+	decoded, present, verr := ParseChannelErrorRetryPolicyInSetting(encoded)
+	require.Nil(t, verr)
+	require.True(t, present)
+	require.Equal(t, settings.ErrorRetryPolicy, decoded)
+}

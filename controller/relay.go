@@ -75,6 +75,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	// body is read or any stream goroutine starts. No-op outside the four
 	// supported HTTP entries.
 	service.BeginErrorMessageMapping(c)
+	// Mark the entry scope of the channel error retry policy. It is a separate,
+	// independent marker: POST on the four supported entries and not a
+	// WebSocket upgrade.
+	service.BeginChannelErrorRetryHTTP(c)
 
 	var (
 		newAPIError *types.NewAPIError

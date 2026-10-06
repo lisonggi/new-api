@@ -79,6 +79,13 @@ func GetJsonType(data RawMessage) string {
 	return kitutil.GetJsonType(data)
 }
 
+// DecodeJSONValue decodes one JSON value into a generic tree. It preserves
+// json.Number and reports duplicate object keys, which strict configuration
+// validation needs. Business code should prefer this over encoding/json.
+func DecodeJSONValue(data []byte) (any, error) {
+	return kitutil.DecodeJSONValue(data)
+}
+
 // JsonRawMessageToString returns JSON strings as their decoded value and other JSON values as raw text.
 func JsonRawMessageToString(data RawMessage) string {
 	return kitutil.JsonRawMessageToString(data)

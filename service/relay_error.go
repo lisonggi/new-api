@@ -18,7 +18,25 @@ import (
 
 // DecideRelayRetry is the single retry decision for relay attempts. The reason
 // is recorded in the request policy decision events of the log details.
+//
+// A channel error retry policy may classify the current upstream HTTP error as
+// retry or stop before the legacy global block. It only overrides the global
+// status eligibility; hard limits (budget, SkipRetry, pin, strict session,
+// cancellation/commit, 2xx and always-skip codes) stay in force. On a miss,
+// disabled/absent policy, or out-of-scope request the legacy block runs with its
+// original branch order and reasons.
 func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) PolicyDecision {
+	if err == nil {
+		return PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}
+	}
+	if decision, handled := decideChannelErrorRetry(c, err, retryTimes); handled {
+		return decision
+	}
+	return decideRelayRetryLegacy(c, err, retryTimes)
+}
+
+// decideRelayRetryLegacy is the unchanged global decision block.
+func decideRelayRetryLegacy(c *gin.Context, err *types.NewAPIError, retryTimes int) PolicyDecision {
 	if err == nil {
 		return PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}
 	}

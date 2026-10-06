@@ -17,22 +17,38 @@ import (
 const requestPolicyContextKey = "request_policy_state"
 
 type PolicyDecision struct {
-	Action string `json:"action"`
-	Reason string `json:"reason"`
-	Source string `json:"source"`
+	Action string               `json:"action"`
+	Reason string               `json:"reason"`
+	Source string               `json:"source"`
+	RuleID string               `json:"rule_id,omitempty"`
+	Audit  *PolicyDecisionAudit `json:"audit,omitempty"`
+}
+
+// PolicyDecisionAudit is the bounded, same-evaluation diagnostic for the
+// channel error retry policy. It is attached only while that policy is active;
+// when the feature is absent or disabled it stays nil and the log keeps its
+// legacy shape. It never carries raw error text, unknown key names, or values.
+type PolicyDecisionAudit struct {
+	Status          string `json:"status,omitempty"` // matched|match_limited|miss|invalid|input_incomplete
+	UpstreamStatus  int    `json:"upstream_status,omitempty"`
+	MatchedStatus   int    `json:"matched_status,omitempty"`
+	RetryErrorType  string `json:"retry_error_type,omitempty"`
+	Diagnostic      string `json:"diagnostic,omitempty"`
+	CandidateRuleID string `json:"candidate_rule_id,omitempty"`
 }
 
 type PolicyEvent struct {
-	Attempt     int            `json:"attempt"`
-	ChannelID   int            `json:"channel_id,omitempty"`
-	Group       string         `json:"group,omitempty"`
-	Rule        string         `json:"rule,omitempty"`
-	Status      int            `json:"status,omitempty"`
-	ErrorCode   string         `json:"error_code,omitempty"`
-	ErrorSource string         `json:"error_source,omitempty"`
-	ElapsedMS   int64          `json:"elapsed_ms"`
-	Decision    PolicyDecision `json:"decision"`
-	Health      string         `json:"health,omitempty"`
+	Attempt        int            `json:"attempt"`
+	ChannelID      int            `json:"channel_id,omitempty"`
+	Group          string         `json:"group,omitempty"`
+	Rule           string         `json:"rule,omitempty"`
+	Status         int            `json:"status,omitempty"`
+	UpstreamStatus int            `json:"upstream_status,omitempty"`
+	ErrorCode      string         `json:"error_code,omitempty"`
+	ErrorSource    string         `json:"error_source,omitempty"`
+	ElapsedMS      int64          `json:"elapsed_ms"`
+	Decision       PolicyDecision `json:"decision"`
+	Health         string         `json:"health,omitempty"`
 }
 
 // RequestPolicyState records how one request was routed so administrators can
@@ -112,6 +128,9 @@ func RecordPolicyFailure(c *gin.Context, channelID int, err *types.NewAPIError, 
 	}
 	state := RequestPolicy(c)
 	event := PolicyEvent{ChannelID: channelID, Status: err.StatusCode, ErrorCode: string(err.GetErrorCode()), ErrorSource: source, Decision: PolicyDecision{Action: "failure", Reason: "upstream_failure", Source: source}}
+	if upstream := err.GetUpstreamHTTPError(); upstream != nil {
+		event.UpstreamStatus = upstream.OriginalStatusCode
+	}
 	if source == "local" {
 		event.Decision.Reason = "local_rejection"
 	}

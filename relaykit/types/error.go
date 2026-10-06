@@ -96,6 +96,34 @@ type NewAPIError struct {
 	errorCode      ErrorCode
 	StatusCode     int
 	Metadata       json.RawMessage
+	// upstreamHTTPError marks an error that was produced by an upstream HTTP
+	// response. It is nil for locally synthesized errors. The original status
+	// code is captured before any local ResetStatusCode mapping.
+	upstreamHTTPError *UpstreamHTTPErrorInfo
+}
+
+// UpstreamHTTPErrorInfo records that an error came from an upstream HTTP
+// response and preserves the wire status code seen before local mapping.
+type UpstreamHTTPErrorInfo struct {
+	OriginalStatusCode int
+}
+
+// GetUpstreamHTTPError returns the upstream HTTP source marker, or nil when the
+// error was not produced by an upstream HTTP response.
+func (e *NewAPIError) GetUpstreamHTTPError() *UpstreamHTTPErrorInfo {
+	if e == nil {
+		return nil
+	}
+	return e.upstreamHTTPError
+}
+
+// SetUpstreamHTTPError marks the error as produced by an upstream HTTP response
+// with the given wire status code. A nil receiver is ignored.
+func (e *NewAPIError) SetUpstreamHTTPError(statusCode int) {
+	if e == nil {
+		return
+	}
+	e.upstreamHTTPError = &UpstreamHTTPErrorInfo{OriginalStatusCode: statusCode}
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.

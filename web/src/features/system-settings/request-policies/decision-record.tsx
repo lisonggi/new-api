@@ -47,6 +47,31 @@ export function PolicyDecisionRecord(props: {
             {t('Source')}: {policyLabel(t, event.decision.source)}
             {event.health ? ` · ${policyLabel(t, event.health)}` : ''}
           </p>
+          {event.decision.rule_id ? (
+            <p className='text-muted-foreground text-xs break-words'>
+              {t('Rule')}: {event.decision.rule_id}
+            </p>
+          ) : null}
+          {event.decision.audit ? (
+            <p className='text-muted-foreground text-xs break-words'>
+              {t('Channel rule audit')}: {event.decision.audit.status ?? ''}
+              {event.decision.audit.upstream_status
+                ? ` · ${t('Upstream HTTP')} ${event.decision.audit.upstream_status}`
+                : ''}
+              {event.decision.audit.matched_status
+                ? ` · ${t('Matched HTTP')} ${event.decision.audit.matched_status}`
+                : ''}
+              {event.decision.audit.retry_error_type
+                ? ` · ${t('Retry match type')} ${event.decision.audit.retry_error_type}`
+                : ''}
+              {event.decision.audit.candidate_rule_id
+                ? ` · ${t('Candidate rule')} ${event.decision.audit.candidate_rule_id}`
+                : ''}
+              {event.decision.audit.diagnostic
+                ? ` · ${event.decision.audit.diagnostic}`
+                : ''}
+            </p>
+          ) : null}
         </li>
       ))}
     </ol>

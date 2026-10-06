@@ -25,6 +25,7 @@ import {
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../constants'
 import { CHANNEL_TYPE_ADVANCED_CUSTOM } from './advanced-custom'
+import { isChannelErrorRetryPolicyConfigured } from './channel-error-retry'
 import { channelFormSchema, type ChannelFormValues } from './channel-form'
 import { supportsResponsesWebSocket } from './responses-websocket'
 
@@ -48,6 +49,10 @@ const CONFIGURATION_BLOCKS = {
   modelMapping: {
     section: 'routing',
     fields: ['model_mapping', 'model_first_response_timeout'],
+  },
+  errorRetryPolicy: {
+    section: 'routing',
+    fields: ['error_retry_policy'],
   },
   routingStrategy: {
     section: 'routing',
@@ -147,6 +152,9 @@ export function getChannelConfigurationState(
     modelMapping:
       hasConfiguredJson(values.model_mapping) ||
       hasConfiguredJson(values.model_first_response_timeout),
+    errorRetryPolicy: isChannelErrorRetryPolicyConfigured(
+      values.error_retry_policy
+    ),
     routingStrategy: Boolean(
       values.priority ||
       values.weight ||

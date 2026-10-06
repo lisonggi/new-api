@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/url"
@@ -55,6 +56,21 @@ type ChannelSettings struct {
 	// HTTP2ConnectionShards spreads HTTP/2 traffic across N independent transports
 	// (1-8). Zero/unset means 1. Ignored when HTTPProtocol is "http1".
 	HTTP2ConnectionShards int `json:"http2_connection_shards,omitempty"`
+	// ErrorRetryPolicy is the optional per-channel error classification policy.
+	// A nil value means no policy and inherits the existing global retry
+	// behaviour. Retry/stop only classify whether the current error may be
+	// retried by the existing retry mechanism; they never select a channel or
+	// change retry counters.
+	ErrorRetryPolicy *ChannelErrorRetryPolicy `json:"error_retry_policy,omitempty"`
+	// ErrorRetryPolicyDiagnostic is runtime-only and never persisted. It carries
+	// a bounded reason when a stored policy is present but invalid, so the
+	// administrator can distinguish "not configured" from "invalid".
+	ErrorRetryPolicyDiagnostic string `json:"-"`
+	// ErrorRetryPolicyRaw is runtime-only and never persisted. It carries the
+	// original stored policy bytes when that policy is invalid, so an internal
+	// read-modify-write of unrelated settings cannot silently drop a value that
+	// only failed strict validation.
+	ErrorRetryPolicyRaw json.RawMessage `json:"-"`
 }
 
 // FirstResponseTimeoutTier pairs an inclusive prompt-token upper bound with the

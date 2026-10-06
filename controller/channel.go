@@ -943,6 +943,11 @@ type ChannelTag struct {
 	Groups         *string `json:"groups"`
 	ParamOverride  *string `json:"param_override"`
 	HeaderOverride *string `json:"header_override"`
+	Proxy          *string `json:"proxy"`
+	HTTPProtocol   *string `json:"http_protocol"`
+	// HTTP2ConnectionShards is only meaningful for HTTP/2; a value above 1 also
+	// lifts an HTTP/1.1 pin, because the two settings cannot coexist.
+	HTTP2ConnectionShards *int `json:"http2_connection_shards"`
 }
 
 func DisableTagChannels(c *gin.Context) {
@@ -1021,7 +1026,9 @@ func EditTagChannels(c *gin.Context) {
 		})
 		return
 	}
-	if (channelTag.ParamOverride != nil || channelTag.HeaderOverride != nil) &&
+	if (channelTag.ParamOverride != nil || channelTag.HeaderOverride != nil ||
+		channelTag.Proxy != nil || channelTag.HTTPProtocol != nil ||
+		channelTag.HTTP2ConnectionShards != nil) &&
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
 		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
@@ -1048,14 +1055,65 @@ func EditTagChannels(c *gin.Context) {
 		}
 		channelTag.HeaderOverride = common.GetPointer[string](trimmed)
 	}
-	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ParamOverride, channelTag.HeaderOverride)
+	if channelTag.Proxy != nil {
+		trimmed := strings.TrimSpace(*channelTag.Proxy)
+		if trimmed != "" {
+			if err := service.ValidateProxyURL(trimmed); err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "代理地址格式错误：" + err.Error(),
+				})
+				return
+			}
+		}
+		normalized, err := service.NormalizeProxyURL(trimmed)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "代理地址格式错误：" + err.Error(),
+			})
+			return
+		}
+		channelTag.Proxy = common.GetPointer[string](normalized)
+	}
+	if channelTag.HTTP2ConnectionShards != nil {
+		shards := *channelTag.HTTP2ConnectionShards
+		if shards < 1 || shards > dto.MaxHTTP2ConnectionShards {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "HTTP/2 分片数量必须在 1-8 之间",
+			})
+			return
+		}
+	}
+	if channelTag.HTTPProtocol != nil {
+		protocol := strings.ToLower(strings.TrimSpace(*channelTag.HTTPProtocol))
+		settings := dto.ChannelSettings{HTTPProtocol: protocol}
+		if channelTag.HTTP2ConnectionShards != nil {
+			settings.HTTP2ConnectionShards = *channelTag.HTTP2ConnectionShards
+		}
+		if err := settings.ValidateHTTPTransport(); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "HTTP 协议设置错误：" + err.Error(),
+			})
+			return
+		}
+		channelTag.HTTPProtocol = common.GetPointer[string](protocol)
+	}
+	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ParamOverride, channelTag.HeaderOverride, channelTag.Proxy, channelTag.HTTPProtocol, channelTag.HTTP2ConnectionShards)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	model.InitChannelCache()
+	if channelTag.Proxy != nil || channelTag.HTTPProtocol != nil || channelTag.HTTP2ConnectionShards != nil {
+		service.ResetProxyClientCache()
+	}
 	recordManageAudit(c, "channel.tag_edit", map[string]any{
-		"tag": channelTag.Tag,
+		"tag":              channelTag.Tag,
+		"proxy_changed":    channelTag.Proxy != nil,
+		"protocol_changed": channelTag.HTTPProtocol != nil || channelTag.HTTP2ConnectionShards != nil,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -1473,7 +1531,9 @@ func buildAdvancedCustomModelPreviewChannel(req fetchModelsRequest) (*model.Chan
 	if req.Proxy != nil {
 		channelSettings := channel.GetSetting()
 		channelSettings.Proxy = strings.TrimSpace(*req.Proxy)
-		channel.SetSetting(channelSettings)
+		if err := channel.SetSetting(channelSettings); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := validateChannel(channel, false); err != nil {

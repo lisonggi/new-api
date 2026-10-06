@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -122,6 +123,42 @@ func TestRelayErrorHandlerKeepsOpenAIErrorMessage(t *testing.T) {
 
 	require.NotNil(t, newAPIError)
 	require.Equal(t, message, newAPIError.Error())
+}
+
+func TestRelayErrorHandlerMarksUpstreamHTTPErrorPreservingWireStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"openai error object", `{"error":{"message":"boom","type":"server_error","code":"server_error"}}`},
+		{"message only", `{"message":"boom"}`},
+		{"invalid json", `not-json`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Body:       io.NopCloser(strings.NewReader(tc.body)),
+			}
+			newAPIError := RelayErrorHandler(context.Background(), resp, false)
+			require.NotNil(t, newAPIError)
+
+			info := newAPIError.GetUpstreamHTTPError()
+			require.NotNil(t, info)
+			require.Equal(t, http.StatusTooManyRequests, info.OriginalStatusCode)
+
+			// Local status mapping must not rewrite the original wire status.
+			ResetStatusCode(newAPIError, `{"429":503}`)
+			require.Equal(t, http.StatusServiceUnavailable, newAPIError.StatusCode)
+			require.Equal(t, http.StatusTooManyRequests, newAPIError.GetUpstreamHTTPError().OriginalStatusCode)
+		})
+	}
+}
+
+func TestLocallySynthesizedErrorsHaveNoUpstreamHTTPMarker(t *testing.T) {
+	require.Nil(t, types.NewError(errors.New("dial failed"), types.ErrorCodeDoRequestFailed).GetUpstreamHTTPError())
+	require.Nil(t, (*types.NewAPIError)(nil).GetUpstreamHTTPError())
 }
 
 func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {

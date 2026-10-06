@@ -40,6 +40,11 @@ import {
   stringifyAdvancedCustomConfig,
   validateAdvancedCustomConfig,
 } from './advanced-custom'
+import {
+  buildChannelErrorRetrySetting,
+  extractSettingFieldRawValue,
+  isValidChannelErrorRetryPolicyJSON,
+} from './channel-error-retry'
 import { readTaskExtendPluginKeys } from './channel-plugin-extensions'
 import { supportsResponsesWebSocket } from './responses-websocket'
 
@@ -82,6 +87,21 @@ function isOptionalProxyURL(value: string | undefined): boolean {
 export const HTTP_PROTOCOL_AUTO = 'auto'
 export const HTTP_PROTOCOL_HTTP1 = 'http1'
 export const MAX_HTTP2_CONNECTION_SHARDS = 8
+
+/** Batch-edit sentinel meaning "leave this setting unchanged". */
+export const KEEP_UNCHANGED = 'keep'
+
+export type HttpProtocolValue =
+  | typeof HTTP_PROTOCOL_AUTO
+  | typeof HTTP_PROTOCOL_HTTP1
+
+export const httpShardItems = Array.from(
+  { length: MAX_HTTP2_CONNECTION_SHARDS },
+  (_, index) => {
+    const value = String(index + 1)
+    return { value, label: value }
+  }
+)
 
 export function normalizeHttpProtocol(
   value: string | undefined | null
@@ -330,6 +350,13 @@ export const channelFormSchema = z
         isOptionalModelFirstResponseTimeout,
         'Model first response timeout must be a JSON object mapping model names to tiers'
       ),
+    error_retry_policy: z
+      .string()
+      .optional()
+      .refine(
+        isValidChannelErrorRetryPolicyJSON,
+        'Error retry policy must be a valid policy object'
+      ),
     proxy: z
       .string()
       .optional()
@@ -528,6 +555,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   responses_reasoning_content_backfill: false,
   ignore_response_model_mismatch: false,
   model_first_response_timeout: '',
+  error_retry_policy: '',
   proxy: '',
   http_protocol: HTTP_PROTOCOL_AUTO,
   http2_connection_shards: 1,
@@ -576,6 +604,7 @@ export function transformChannelToFormDefaults(
     responses_reasoning_content_backfill: false,
     ignore_response_model_mismatch: false,
     model_first_response_timeout: '',
+    error_retry_policy: '',
     proxy: '',
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
     http2_connection_shards: 1,
@@ -591,6 +620,10 @@ export function transformChannelToFormDefaults(
       const protocol = normalizeHttpProtocol(parsed.http_protocol)
       const shards = normalizeHttp2ConnectionShards(
         parsed.http2_connection_shards
+      )
+      const errorRetryPolicyField = extractSettingFieldRawValue(
+        channel.setting,
+        'error_retry_policy'
       )
       extraSettings = {
         task_plugin_key: parsed.task_plugin_key || '',
@@ -608,6 +641,9 @@ export function transformChannelToFormDefaults(
           !Array.isArray(parsed.model_first_response_timeout)
             ? JSON.stringify(parsed.model_first_response_timeout, null, 2)
             : '',
+        error_retry_policy: errorRetryPolicyField.ambiguous
+          ? (channel.setting ?? '')
+          : (errorRetryPolicyField.value ?? ''),
         proxy: parsed.proxy || '',
         http_protocol: protocol,
         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
@@ -748,6 +784,9 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
       formData.ignore_response_model_mismatch === true,
     model_first_response_timeout: parseModelFirstResponseTimeout(
       formData.model_first_response_timeout
+    ),
+    error_retry_policy: buildChannelErrorRetrySetting(
+      formData.error_retry_policy
     ),
     proxy: formData.proxy?.trim() || '',
     pass_through_body_enabled:
