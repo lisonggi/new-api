@@ -28,6 +28,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -39,8 +47,18 @@ import {
   getAllModels,
   getGroups,
 } from '../../api'
-import { channelsQueryKeys } from '../../lib'
+import { FIELD_DESCRIPTIONS, FIELD_PLACEHOLDERS } from '../../constants'
+import {
+  HTTP_PROTOCOL_HTTP1,
+  KEEP_UNCHANGED,
+  channelsQueryKeys,
+  type HttpProtocolValue,
+} from '../../lib'
 import type { TagOperationParams } from '../../types'
+import {
+  HttpProtocolSelect,
+  HttpShardsSelect,
+} from '../channel-transport-fields'
 import { useChannels } from '../channels-provider'
 import { ModelMappingEditor } from '../model-mapping-editor'
 
@@ -48,6 +66,10 @@ type TagBatchEditDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
+
+type ProtocolChoice = typeof KEEP_UNCHANGED | HttpProtocolValue
+
+type ProxyMode = typeof KEEP_UNCHANGED | 'set' | 'clear'
 
 export function TagBatchEditDialog({
   open,
@@ -64,6 +86,11 @@ export function TagBatchEditDialog({
   const [models, setModels] = useState('')
   const [modelMapping, setModelMapping] = useState('')
   const [groups, setGroups] = useState<string[]>([])
+  const [httpProtocol, setHttpProtocol] =
+    useState<ProtocolChoice>(KEEP_UNCHANGED)
+  const [proxyMode, setProxyMode] = useState<ProxyMode>(KEEP_UNCHANGED)
+  const [proxyAddress, setProxyAddress] = useState('')
+  const [shards, setShards] = useState<string>(KEEP_UNCHANGED)
 
   // Fetch available groups
   const { data: groupsData, isLoading: isLoadingGroups } = useQuery({
@@ -128,9 +155,14 @@ export function TagBatchEditDialog({
       }
     }
 
+    if (proxyMode === 'set' && !proxyAddress.trim()) {
+      toast.error(t('Proxy address is required'))
+      return
+    }
+
     setIsSaving(true)
     try {
-      const params: Record<string, string | undefined> = {
+      const params: Record<string, string | number | undefined> = {
         tag: currentTag,
       }
 
@@ -148,6 +180,20 @@ export function TagBatchEditDialog({
 
       if (groups.length > 0) {
         params.groups = groups.join(',')
+      }
+
+      if (httpProtocol !== KEEP_UNCHANGED) {
+        params.http_protocol = httpProtocol
+      }
+
+      if (shards !== KEEP_UNCHANGED) {
+        params.http2_connection_shards = Number(shards)
+      }
+
+      if (proxyMode === 'clear') {
+        params.proxy = ''
+      } else if (proxyMode === 'set') {
+        params.proxy = proxyAddress.trim()
       }
 
       // Check if there are any changes
@@ -178,6 +224,10 @@ export function TagBatchEditDialog({
     setModels('')
     setModelMapping('')
     setGroups([])
+    setHttpProtocol(KEEP_UNCHANGED)
+    setProxyMode(KEEP_UNCHANGED)
+    setProxyAddress('')
+    setShards(KEEP_UNCHANGED)
     onOpenChange(false)
   }
 
@@ -288,6 +338,95 @@ export function TagBatchEditDialog({
             )}
             <p className='text-muted-foreground text-xs'>
               {t('User groups that can access channels with this tag')}
+            </p>
+          </div>
+
+          {/* HTTP Protocol */}
+          <div className='space-y-2'>
+            <Label htmlFor='http-protocol'>{t('HTTP Protocol')}</Label>
+            <HttpProtocolSelect
+              id='http-protocol'
+              className='w-full'
+              allowUnchanged
+              value={httpProtocol}
+              onValueChange={(value) => {
+                const next = value as ProtocolChoice
+                setHttpProtocol(next)
+                if (next === HTTP_PROTOCOL_HTTP1) {
+                  // HTTP/1.1 always uses a single connection shard.
+                  setShards('1')
+                } else if (next === KEEP_UNCHANGED) {
+                  // Returning to "keep unchanged" must drop the shard value that
+                  // HTTP/1.1 implied; otherwise saving would rewrite the shards
+                  // of every channel with this tag without being asked to.
+                  setShards(KEEP_UNCHANGED)
+                }
+              }}
+              disabled={isSaving}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t(FIELD_DESCRIPTIONS.HTTP_PROTOCOL)}
+            </p>
+          </div>
+
+          {/* HTTP/2 Connection Shards */}
+          <div className='space-y-2'>
+            <Label htmlFor='http2-connection-shards'>
+              {t('HTTP/2 Connection Shards')}
+            </Label>
+            <HttpShardsSelect
+              id='http2-connection-shards'
+              className='w-full'
+              allowUnchanged
+              value={shards}
+              onValueChange={(value) => setShards(value)}
+              disabled={isSaving || httpProtocol === HTTP_PROTOCOL_HTTP1}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {httpProtocol === HTTP_PROTOCOL_HTTP1
+                ? t(FIELD_DESCRIPTIONS.HTTP2_CONNECTION_SHARDS_HTTP1)
+                : t(FIELD_DESCRIPTIONS.HTTP2_CONNECTION_SHARDS)}
+            </p>
+          </div>
+
+          {/* Proxy */}
+          <div className='space-y-2'>
+            <Label htmlFor='proxy-mode'>{t('Proxy Address')}</Label>
+            <Select
+              items={[
+                { value: KEEP_UNCHANGED, label: t('Keep unchanged') },
+                { value: 'set', label: t('Set') },
+                { value: 'clear', label: t('Clear') },
+              ]}
+              value={proxyMode}
+              onValueChange={(value) => setProxyMode(value as ProxyMode)}
+              disabled={isSaving}
+            >
+              <SelectTrigger id='proxy-mode' className='w-full'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  <SelectItem value={KEEP_UNCHANGED}>
+                    {t('Keep unchanged')}
+                  </SelectItem>
+                  <SelectItem value='set'>{t('Set')}</SelectItem>
+                  <SelectItem value='clear'>{t('Clear')}</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {proxyMode === 'set' ? (
+              <Input
+                id='proxy-address'
+                aria-label={t('Proxy Address')}
+                placeholder={t(FIELD_PLACEHOLDERS.PROXY)}
+                value={proxyAddress}
+                onChange={(e) => setProxyAddress(e.target.value)}
+                disabled={isSaving}
+              />
+            ) : null}
+            <p className='text-muted-foreground text-xs'>
+              {t(FIELD_DESCRIPTIONS.PROXY)}
             </p>
           </div>
         </div>

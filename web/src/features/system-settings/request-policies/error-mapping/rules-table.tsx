@@ -16,34 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  ArrowDown,
-  ArrowUp,
-  Edit,
-  ListFilter,
-  Plus,
-  Trash2,
-} from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import {
-  DataTableRowActionMenu,
-  StaticDataTable,
-  TruncatedCell,
-} from '@/components/data-table'
-import { EmptyState } from '@/components/empty-state'
+import { TruncatedCell } from '@/components/data-table'
+import { RuleListTable } from '@/components/rule-list-table'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import {
-  DropdownMenuGroup,
-  DropdownMenuItem,
-} from '@/components/ui/dropdown-menu'
-import { Switch } from '@/components/ui/switch'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 
 import type { ErrorMappingRule } from './types'
 
@@ -61,38 +39,33 @@ export function ErrorMappingRulesTable(props: ErrorMappingRulesTableProps) {
 
   const ruleLabel = (rule: ErrorMappingRule) => rule.name || rule.keyword
 
-  if (props.rules.length === 0) {
-    return (
-      <EmptyState
-        icon={ListFilter}
-        title={t('No mapping rules yet')}
-        description={t(
-          'Add a rule to replace a client-facing error message when it contains a keyword.'
-        )}
-        className='min-h-56'
-        action={
-          <Button variant='outline' onClick={props.onAdd}>
-            <Plus aria-hidden='true' />
-            {t('Add mapping rule')}
-          </Button>
-        }
-      />
-    )
-  }
-
   return (
-    <StaticDataTable
-      className='focus-visible:outline-ring overflow-x-auto rounded-none border-0 focus-visible:-outline-offset-2'
-      containerProps={{
-        role: 'region',
-        'aria-label': t('Error message mapping rules table'),
-        tabIndex: 0,
-      }}
-      tableProps={{ withContainer: false }}
+    <RuleListTable
+      ariaLabel={t('Error message mapping rules table')}
       tableClassName='min-w-[880px] table-fixed [&_th]:px-4 [&_th]:text-muted-foreground [&_td]:px-4 [&_td]:py-4 [&_code]:font-mono!'
-      headerRowClassName='bg-muted/35 hover:bg-muted/35'
-      data={props.rules}
+      rules={props.rules}
       getRowKey={(rule) => rule.id}
+      empty={{
+        title: t('No mapping rules yet'),
+        description: t(
+          'Add a rule to replace a client-facing error message when it contains a keyword.'
+        ),
+        actionLabel: t('Add mapping rule'),
+        actionIcon: Plus,
+        onAction: props.onAdd,
+      }}
+      enabled={{
+        isEnabled: (rule) => rule.enabled,
+        onToggle: (_rule, index, enabled) => props.onToggle(index, enabled),
+      }}
+      actions={{
+        name: ruleLabel,
+        editLabel: t('Edit mapping rule'),
+        deleteLabel: t('Delete mapping rule'),
+        onEdit: (_rule, index) => props.onEdit(index),
+        onDelete: (_rule, index) => props.onDelete(index),
+        onMove: props.onMove,
+      }}
       columns={[
         {
           id: 'name',
@@ -141,91 +114,6 @@ export function ErrorMappingRulesTable(props: ErrorMappingRulesTableProps) {
                 ? t('Case sensitive')
                 : t('Case insensitive')}
             </Badge>
-          ),
-        },
-        {
-          id: 'enabled',
-          header: t('Enabled'),
-          className: 'w-20',
-          cell: (rule, index) => (
-            <Switch
-              checked={rule.enabled}
-              onCheckedChange={(checked) => props.onToggle(index, checked)}
-              aria-label={t('Enable rule {{name}}', {
-                name: ruleLabel(rule),
-              })}
-            />
-          ),
-        },
-        {
-          id: 'actions',
-          header: t('Actions'),
-          className: 'w-40 text-right',
-          cell: (rule, index) => (
-            <div
-              role='group'
-              aria-label={t('Actions for {{name}}', { name: ruleLabel(rule) })}
-              className='flex items-center justify-end gap-0.5'
-            >
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      aria-label={t('Move rule up')}
-                      disabled={index === 0}
-                      onClick={() => props.onMove(index, -1)}
-                    >
-                      <ArrowUp aria-hidden='true' />
-                    </Button>
-                  }
-                />
-                <TooltipContent>{t('Move rule up')}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      aria-label={t('Move rule down')}
-                      disabled={index === props.rules.length - 1}
-                      onClick={() => props.onMove(index, 1)}
-                    >
-                      <ArrowDown aria-hidden='true' />
-                    </Button>
-                  }
-                />
-                <TooltipContent>{t('Move rule down')}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      aria-label={t('Edit mapping rule')}
-                      onClick={() => props.onEdit(index)}
-                    >
-                      <Edit aria-hidden='true' />
-                    </Button>
-                  }
-                />
-                <TooltipContent>{t('Edit mapping rule')}</TooltipContent>
-              </Tooltip>
-              <DataTableRowActionMenu ariaLabel={t('More actions')}>
-                <DropdownMenuGroup>
-                  <DropdownMenuItem
-                    variant='destructive'
-                    onClick={() => props.onDelete(index)}
-                  >
-                    <Trash2 aria-hidden='true' />
-                    {t('Delete mapping rule')}
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DataTableRowActionMenu>
-            </div>
           ),
         },
       ]}

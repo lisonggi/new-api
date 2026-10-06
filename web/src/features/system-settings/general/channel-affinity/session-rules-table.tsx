@@ -18,34 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   ArrowLeftRight,
-  Edit,
   FileText,
   Link2Off,
-  ListFilter,
   LockKeyhole,
   Trash2,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import {
-  DataTableRowActionMenu,
-  StaticDataTable,
-  TruncatedCell,
-} from '@/components/data-table'
-import { EmptyState } from '@/components/empty-state'
+import { TruncatedCell } from '@/components/data-table'
+import { RuleListTable } from '@/components/rule-list-table'
 import { StatusBadge, StatusBadgeList } from '@/components/status-badge'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import {
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 
@@ -67,36 +54,37 @@ export function SessionRulesTable(props: SessionRulesTableProps) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
 
-  if (props.rules.length === 0) {
-    return (
-      <EmptyState
-        icon={ListFilter}
-        title={t('No rules yet')}
-        description={t('Fill a CLI template or add a blank rule.')}
-        className='min-h-56'
-        action={
-          <Button variant='outline' onClick={props.onFillTemplates}>
-            <FileText aria-hidden='true' />
-            {t('Fill Templates')}
-          </Button>
-        }
-      />
-    )
-  }
-
   return (
-    <StaticDataTable
-      className='focus-visible:outline-ring overflow-x-auto rounded-none border-0 focus-visible:-outline-offset-2'
-      containerProps={{
-        role: 'region',
-        'aria-label': t('Session rules table'),
-        tabIndex: 0,
-      }}
-      tableProps={{ withContainer: false }}
+    <RuleListTable
+      ariaLabel={t('Session rules table')}
       tableClassName='min-w-[960px] table-fixed [&_th]:px-4 [&_th]:text-muted-foreground [&_td]:px-4 [&_td]:py-4 [&_code]:font-mono!'
-      headerRowClassName='bg-muted/35 hover:bg-muted/35'
-      data={props.rules}
+      rules={props.rules}
       getRowKey={(rule) => rule.id ?? rule.name}
+      empty={{
+        title: t('No rules yet'),
+        description: t('Fill a CLI template or add a blank rule.'),
+        actionLabel: t('Fill Templates'),
+        actionIcon: FileText,
+        onAction: props.onFillTemplates,
+      }}
+      actions={{
+        name: (rule) => rule.name,
+        editLabel: t('Edit Rule'),
+        deleteLabel: t('Delete Rule'),
+        headerClassName: 'w-24 text-right',
+        onEdit: (rule) => props.onEdit(rule),
+        onDelete: (rule) => props.onDelete(rule),
+        extraMenuItems: (rule) =>
+          rule.include_rule_name ? (
+            <>
+              <DropdownMenuItem onClick={() => props.onClearCache(rule.name)}>
+                <Trash2 aria-hidden='true' />
+                {t('Clear cache for this rule')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          ) : null,
+      }}
       columns={[
         {
           id: 'name',
@@ -241,56 +229,6 @@ export function SessionRulesTable(props: SessionRulesTableProps) {
               locale
             )
           },
-        },
-        {
-          id: 'actions',
-          header: t('Actions'),
-          className: 'w-24 text-right',
-          cell: (rule) => (
-            <div
-              role='group'
-              aria-label={t('Actions for {{name}}', { name: rule.name })}
-              className='flex items-center justify-end gap-0.5'
-            >
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      aria-label={t('Edit Rule')}
-                      onClick={() => props.onEdit(rule)}
-                    >
-                      <Edit aria-hidden='true' />
-                    </Button>
-                  }
-                />
-                <TooltipContent>{t('Edit Rule')}</TooltipContent>
-              </Tooltip>
-              <DataTableRowActionMenu ariaLabel={t('More actions')}>
-                <DropdownMenuGroup>
-                  {rule.include_rule_name ? (
-                    <>
-                      <DropdownMenuItem
-                        onClick={() => props.onClearCache(rule.name)}
-                      >
-                        <Trash2 aria-hidden='true' />
-                        {t('Clear cache for this rule')}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                    </>
-                  ) : null}
-                  <DropdownMenuItem
-                    variant='destructive'
-                    onClick={() => props.onDelete(rule)}
-                  >
-                    <Trash2 aria-hidden='true' />
-                    {t('Delete Rule')}
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DataTableRowActionMenu>
-            </div>
-          ),
         },
       ]}
     />
