@@ -92,8 +92,11 @@ export function mapStatusDataToConfig(
   }
 
   return {
-    systemName: (data.system_name as string | undefined) || DEFAULT_SYSTEM_NAME,
-    logo: (data.logo as string | undefined) || DEFAULT_LOGO,
+    // Branding is intentionally constant rather than read from `/api/status`:
+    // the logo ships with the build, so the first paint already shows it and
+    // neither the header nor the favicon can flash while status is loading.
+    systemName: DEFAULT_SYSTEM_NAME,
+    logo: DEFAULT_LOGO,
     footerHtml: data.footer_html as string | undefined,
     demoSiteEnabled: data.demo_site_enabled as boolean | undefined,
     displayTokenStatEnabled: data.display_token_stat_enabled as
