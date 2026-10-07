@@ -23,7 +23,7 @@ import { UsageLogs } from '@/features/usage-logs'
 import {
   isUsageLogsSectionId,
   USAGE_LOGS_DEFAULT_SECTION,
-} from '@/features/usage-logs/section-registry'
+} from '@/features/usage-logs/sections'
 
 const logTypeValues = ['0', '1', '2', '3', '4', '5', '6', '7'] as const
 const logTypeSearchSchema = z

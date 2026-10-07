@@ -16,23 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+/**
+ * Section ids for `/dashboard`, mirroring `section-registry.tsx`.
+ *
+ * Route files need them in `beforeLoad`, and TanStack Router only code-splits
+ * the route `component`, so importing the registry from a route file pulled
+ * every dashboard section into the entry chunk. `__tests__/sections.test.ts`
+ * fails when the two drift apart.
+ */
+export const DASHBOARD_SECTION_IDS = [
+  'overview',
+  'models',
+  'flow',
+  'users',
+] as const
 
-import { Dashboard } from '@/features/dashboard'
-import {
-  DASHBOARD_SECTION_IDS,
-  DASHBOARD_DEFAULT_SECTION,
-} from '@/features/dashboard/sections'
-
-export const Route = createFileRoute('/_authenticated/dashboard/$section')({
-  beforeLoad: ({ params }) => {
-    const validSections = DASHBOARD_SECTION_IDS as unknown as string[]
-    if (!validSections.includes(params.section)) {
-      throw redirect({
-        to: '/dashboard/$section',
-        params: { section: DASHBOARD_DEFAULT_SECTION },
-      })
-    }
-  },
-  component: Dashboard,
-})
+export const DASHBOARD_DEFAULT_SECTION = 'overview'

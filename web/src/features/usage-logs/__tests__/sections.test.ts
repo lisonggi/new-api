@@ -16,23 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { describe, expect, it } from 'vitest'
 
-import { Dashboard } from '@/features/dashboard'
 import {
-  DASHBOARD_SECTION_IDS,
-  DASHBOARD_DEFAULT_SECTION,
-} from '@/features/dashboard/sections'
+  USAGE_LOGS_DEFAULT_SECTION as registryDefaultSection,
+  USAGE_LOGS_SECTION_IDS as registrySectionIds,
+} from '../section-registry'
+import {
+  USAGE_LOGS_DEFAULT_SECTION,
+  USAGE_LOGS_SECTION_IDS,
+} from '../sections'
 
-export const Route = createFileRoute('/_authenticated/dashboard/$section')({
-  beforeLoad: ({ params }) => {
-    const validSections = DASHBOARD_SECTION_IDS as unknown as string[]
-    if (!validSections.includes(params.section)) {
-      throw redirect({
-        to: '/dashboard/$section',
-        params: { section: DASHBOARD_DEFAULT_SECTION },
-      })
-    }
-  },
-  component: Dashboard,
+describe('usage logs section ids', () => {
+  it('stays in sync with the section registry used by route validation', () => {
+    expect([...USAGE_LOGS_SECTION_IDS]).toEqual([...registrySectionIds])
+    expect(USAGE_LOGS_DEFAULT_SECTION).toBe(registryDefaultSection)
+  })
 })

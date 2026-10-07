@@ -23,7 +23,7 @@ import { Models } from '@/features/models'
 import {
   MODELS_SECTION_IDS,
   MODELS_DEFAULT_SECTION,
-} from '@/features/models/section-registry'
+} from '@/features/models/sections'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
