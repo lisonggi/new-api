@@ -30,25 +30,22 @@ export default defineConfig(({ envMode }) => {
       preset: 'default',
       cacheGroups: {
         'vendor-react': {
-          test: /node_modules[\\/](react|react-dom)[\\/]/,
+          test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
           name: 'vendor-react',
           chunks: 'all',
           priority: 0,
           enforce: true,
         },
-        'vendor-ui-primitives': {
-          test: /node_modules[\\/](@base-ui|@radix-ui)[\\/]/,
-          name: 'vendor-ui-primitives',
+        // Deliberately unnamed: rspack then splits these by real usage, so
+        // modules that only async routes need (e.g. the data table, the
+        // combobox/slider/select primitives) stay in async chunks instead of
+        // being merged into the chunk the entry loads.
+        vendors: {
+          test: /[\\/]node_modules[\\/]/,
           chunks: 'all',
-          priority: 0,
-          enforce: true,
-        },
-        'vendor-tanstack': {
-          test: /node_modules[\\/]@tanstack[\\/]/,
-          name: 'vendor-tanstack',
-          chunks: 'all',
-          priority: 0,
-          enforce: true,
+          minChunks: 2,
+          priority: -1,
+          reuseExistingChunk: true,
         },
       },
     },
