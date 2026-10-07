@@ -189,7 +189,8 @@ describe('wallet redemption success dialog', () => {
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('兑换成功')).toBeVisible()
-    expect(within(dialog).getByText('好评')).toBeVisible()
+    // Markdown is loaded on demand, so its content resolves asynchronously.
+    expect(await within(dialog).findByText('好评')).toBeVisible()
     expect(screen.getByLabelText('Have a Code?')).toHaveValue('')
     expect(getSelf).toHaveBeenCalledTimes(2)
 

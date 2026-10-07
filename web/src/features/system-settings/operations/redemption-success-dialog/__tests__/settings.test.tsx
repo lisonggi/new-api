@@ -176,7 +176,8 @@ describe('redemption success dialog settings', () => {
     )
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('兑换成功')).toBeVisible()
-    expect(within(dialog).getByText('好评')).toBeVisible()
+    // Markdown is loaded on demand, so its content resolves asynchronously.
+    expect(await within(dialog).findByText('好评')).toBeVisible()
     expect(
       within(dialog).getByText(
         'Preview only. It does not save the draft or redeem a code.'
