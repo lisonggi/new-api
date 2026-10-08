@@ -933,21 +933,203 @@ func DeleteDisabledChannel(c *gin.Context) {
 	return
 }
 
+// ChannelBatchAttributes is the attribute payload shared by the tag batch edit
+// and the selected-channel batch edit. Every field is opt-in: a nil pointer
+// leaves that attribute untouched, and Models/ModelMapping/Groups carry a mode
+// so an administrator can append/merge instead of replacing.
+type ChannelBatchAttributes struct {
+	Models                *string                      `json:"models"`
+	ModelsMode            string                       `json:"models_mode"`
+	ModelMapping          *string                      `json:"model_mapping"`
+	ModelMappingMode      string                       `json:"model_mapping_mode"`
+	Groups                *string                      `json:"groups"`
+	GroupsMode            string                       `json:"groups_mode"`
+	Priority              *int64                       `json:"priority"`
+	Weight                *uint                        `json:"weight"`
+	ParamOverride         *string                      `json:"param_override"`
+	HeaderOverride        *string                      `json:"header_override"`
+	Proxy                 *string                      `json:"proxy"`
+	HTTPProtocol          *string                      `json:"http_protocol"`
+	HTTP2ConnectionShards *int                         `json:"http2_connection_shards"`
+	Settings              *ChannelBatchSettingsRequest `json:"settings"`
+}
+
+// ChannelBatchSettingsRequest is the partial setting-JSON patch of a batch edit.
+// Only the provided keys are written; model_first_response_timeout additionally
+// honors a replace/merge mode and error_retry_policy is strictly validated.
+type ChannelBatchSettingsRequest struct {
+	ReasoningContentBackfill          *bool                                     `json:"reasoning_content_backfill"`
+	ResponsesReasoningContentBackfill *bool                                     `json:"responses_reasoning_content_backfill"`
+	IgnoreResponseModelMismatch       *bool                                     `json:"ignore_response_model_mismatch"`
+	ThinkingToContent                 *bool                                     `json:"thinking_to_content"`
+	SystemPrompt                      *string                                   `json:"system_prompt"`
+	SystemPromptOverride              *bool                                     `json:"system_prompt_override"`
+	DisableTaskPollingSleep           *bool                                     `json:"disable_task_polling_sleep"`
+	ModelFirstResponseTimeout         map[string][]dto.FirstResponseTimeoutTier `json:"model_first_response_timeout"`
+	ModelFirstResponseTimeoutMode     string                                    `json:"model_first_response_timeout_mode"`
+	ErrorRetryPolicy                  json.RawMessage                           `json:"error_retry_policy"`
+}
+
+// ChannelTag is the payload of the tag batch edit endpoints. Disable/Enable only
+// read Tag; Edit reads the embedded attributes.
 type ChannelTag struct {
-	Tag            string  `json:"tag"`
-	NewTag         *string `json:"new_tag"`
-	Priority       *int64  `json:"priority"`
-	Weight         *uint   `json:"weight"`
-	ModelMapping   *string `json:"model_mapping"`
-	Models         *string `json:"models"`
-	Groups         *string `json:"groups"`
-	ParamOverride  *string `json:"param_override"`
-	HeaderOverride *string `json:"header_override"`
-	Proxy          *string `json:"proxy"`
-	HTTPProtocol   *string `json:"http_protocol"`
-	// HTTP2ConnectionShards is only meaningful for HTTP/2; a value above 1 also
-	// lifts an HTTP/1.1 pin, because the two settings cannot coexist.
-	HTTP2ConnectionShards *int `json:"http2_connection_shards"`
+	Tag    string  `json:"tag"`
+	NewTag *string `json:"new_tag"`
+	ChannelBatchAttributes
+}
+
+func validateBatchMode(name string, value string, allowed ...string) error {
+	if value == "" {
+		return nil
+	}
+	for _, candidate := range allowed {
+		if value == candidate {
+			return nil
+		}
+	}
+	return fmt.Errorf("参数错误：%s", name)
+}
+
+// toModelPatch validates the settings patch and reports whether it carries any
+// value, so a present-but-empty settings object stays a no-op.
+func (s *ChannelBatchSettingsRequest) toModelPatch() (*model.ChannelBatchSettings, bool, error) {
+	if err := validateBatchMode("model_first_response_timeout_mode", s.ModelFirstResponseTimeoutMode, "replace", "merge"); err != nil {
+		return nil, false, err
+	}
+	patch := &model.ChannelBatchSettings{
+		ReasoningContentBackfill:          s.ReasoningContentBackfill,
+		ResponsesReasoningContentBackfill: s.ResponsesReasoningContentBackfill,
+		IgnoreResponseModelMismatch:       s.IgnoreResponseModelMismatch,
+		ThinkingToContent:                 s.ThinkingToContent,
+		SystemPrompt:                      s.SystemPrompt,
+		SystemPromptOverride:              s.SystemPromptOverride,
+	}
+	hasValues := s.ReasoningContentBackfill != nil ||
+		s.ResponsesReasoningContentBackfill != nil ||
+		s.IgnoreResponseModelMismatch != nil ||
+		s.ThinkingToContent != nil ||
+		s.SystemPrompt != nil ||
+		s.SystemPromptOverride != nil
+	if s.ModelFirstResponseTimeout != nil {
+		timeout := s.ModelFirstResponseTimeout
+		timeoutSettings := dto.ChannelSettings{ModelFirstResponseTimeout: timeout}
+		if err := timeoutSettings.ValidateFirstResponseTimeout(); err != nil {
+			return nil, false, fmt.Errorf("首字超时设置错误：%s", err.Error())
+		}
+		patch.ModelFirstResponseTimeout = &timeout
+		patch.ModelFirstResponseTimeoutMode = s.ModelFirstResponseTimeoutMode
+		hasValues = true
+	}
+	if raw := strings.TrimSpace(string(s.ErrorRetryPolicy)); raw != "" && raw != "null" {
+		policy, present, verr := dto.ParseChannelErrorRetryPolicyInSetting([]byte(`{"error_retry_policy":` + raw + `}`))
+		if verr != nil {
+			return nil, false, fmt.Errorf("错误重试判断设置错误：%s", verr.Error())
+		}
+		if present {
+			patch.ErrorRetryPolicy = policy
+			hasValues = true
+		}
+	}
+	return patch, hasValues, nil
+}
+
+// toModelFields validates the attribute payload and converts it to the model
+// batch fields. sensitive reports whether the payload changes a sensitive
+// setting, so the caller can enforce ChannelSensitiveWrite; hasValues reports
+// whether anything at all was requested.
+func (a *ChannelBatchAttributes) toModelFields() (fields model.ChannelBatchFields, sensitive bool, hasValues bool, err error) {
+	if err := validateBatchMode("models_mode", a.ModelsMode, "replace", "append"); err != nil {
+		return fields, false, false, err
+	}
+	if err := validateBatchMode("model_mapping_mode", a.ModelMappingMode, "replace", "merge"); err != nil {
+		return fields, false, false, err
+	}
+	if err := validateBatchMode("groups_mode", a.GroupsMode, "replace", "append"); err != nil {
+		return fields, false, false, err
+	}
+	fields = model.ChannelBatchFields{
+		Models:                a.Models,
+		ModelsMode:            a.ModelsMode,
+		ModelMapping:          a.ModelMapping,
+		ModelMappingMode:      a.ModelMappingMode,
+		Group:                 a.Groups,
+		GroupMode:             a.GroupsMode,
+		Priority:              a.Priority,
+		Weight:                a.Weight,
+		Proxy:                 a.Proxy,
+		HTTPProtocol:          a.HTTPProtocol,
+		HTTP2ConnectionShards: a.HTTP2ConnectionShards,
+	}
+	hasValues = a.Models != nil || a.ModelMapping != nil || a.Groups != nil ||
+		a.Priority != nil || a.Weight != nil || a.ParamOverride != nil || a.HeaderOverride != nil ||
+		a.Proxy != nil || a.HTTPProtocol != nil || a.HTTP2ConnectionShards != nil
+	sensitive = a.Proxy != nil || a.HTTPProtocol != nil || a.HTTP2ConnectionShards != nil ||
+		a.ParamOverride != nil || a.HeaderOverride != nil
+	if a.ParamOverride != nil {
+		trimmed := strings.TrimSpace(*a.ParamOverride)
+		if trimmed != "" && !json.Valid([]byte(trimmed)) {
+			return fields, false, false, errors.New("参数覆盖必须是合法的 JSON 格式")
+		}
+		fields.ParamOverride = common.GetPointer[string](trimmed)
+	}
+	if a.HeaderOverride != nil {
+		trimmed := strings.TrimSpace(*a.HeaderOverride)
+		if trimmed != "" && !json.Valid([]byte(trimmed)) {
+			return fields, false, false, errors.New("请求头覆盖必须是合法的 JSON 格式")
+		}
+		fields.HeaderOverride = common.GetPointer[string](trimmed)
+	}
+	if a.Proxy != nil {
+		trimmed := strings.TrimSpace(*a.Proxy)
+		if trimmed != "" {
+			if err := service.ValidateProxyURL(trimmed); err != nil {
+				return fields, false, false, fmt.Errorf("代理地址格式错误：%s", err.Error())
+			}
+		}
+		normalized, err := service.NormalizeProxyURL(trimmed)
+		if err != nil {
+			return fields, false, false, fmt.Errorf("代理地址格式错误：%s", err.Error())
+		}
+		fields.Proxy = common.GetPointer[string](normalized)
+	}
+	if a.HTTP2ConnectionShards != nil {
+		shards := *a.HTTP2ConnectionShards
+		if shards < 1 || shards > dto.MaxHTTP2ConnectionShards {
+			return fields, false, false, errors.New("HTTP/2 分片数量必须在 1-8 之间")
+		}
+	}
+	if a.HTTPProtocol != nil {
+		protocol := strings.ToLower(strings.TrimSpace(*a.HTTPProtocol))
+		settings := dto.ChannelSettings{HTTPProtocol: protocol}
+		if a.HTTP2ConnectionShards != nil {
+			settings.HTTP2ConnectionShards = *a.HTTP2ConnectionShards
+		}
+		if err := settings.ValidateHTTPTransport(); err != nil {
+			return fields, false, false, fmt.Errorf("HTTP 协议设置错误：%s", err.Error())
+		}
+		fields.HTTPProtocol = common.GetPointer[string](protocol)
+	}
+	if a.Settings != nil {
+		patch, settingsHasValues, err := a.Settings.toModelPatch()
+		if err != nil {
+			return fields, false, false, err
+		}
+		if settingsHasValues {
+			fields.Settings = patch
+			sensitive = true
+			hasValues = true
+		}
+		// disable_task_polling_sleep lives in the "settings" column, not the
+		// "setting" column, so it travels as a separate patch.
+		if a.Settings.DisableTaskPollingSleep != nil {
+			fields.OtherSettings = &model.ChannelBatchOtherSettings{
+				DisableTaskPollingSleep: a.Settings.DisableTaskPollingSleep,
+			}
+			sensitive = true
+			hasValues = true
+		}
+	}
+	return fields, sensitive, hasValues, nil
 }
 
 func DisableTagChannels(c *gin.Context) {
@@ -1026,94 +1208,31 @@ func EditTagChannels(c *gin.Context) {
 		})
 		return
 	}
-	if (channelTag.ParamOverride != nil || channelTag.HeaderOverride != nil ||
-		channelTag.Proxy != nil || channelTag.HTTPProtocol != nil ||
-		channelTag.HTTP2ConnectionShards != nil) &&
-		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+	fields, sensitive, _, err := channelTag.ChannelBatchAttributes.toModelFields()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if sensitive && !authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
 		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
-	if channelTag.ParamOverride != nil {
-		trimmed := strings.TrimSpace(*channelTag.ParamOverride)
-		if trimmed != "" && !json.Valid([]byte(trimmed)) {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "参数覆盖必须是合法的 JSON 格式",
-			})
-			return
-		}
-		channelTag.ParamOverride = common.GetPointer[string](trimmed)
-	}
-	if channelTag.HeaderOverride != nil {
-		trimmed := strings.TrimSpace(*channelTag.HeaderOverride)
-		if trimmed != "" && !json.Valid([]byte(trimmed)) {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "请求头覆盖必须是合法的 JSON 格式",
-			})
-			return
-		}
-		channelTag.HeaderOverride = common.GetPointer[string](trimmed)
-	}
-	if channelTag.Proxy != nil {
-		trimmed := strings.TrimSpace(*channelTag.Proxy)
-		if trimmed != "" {
-			if err := service.ValidateProxyURL(trimmed); err != nil {
-				c.JSON(http.StatusOK, gin.H{
-					"success": false,
-					"message": "代理地址格式错误：" + err.Error(),
-				})
-				return
-			}
-		}
-		normalized, err := service.NormalizeProxyURL(trimmed)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "代理地址格式错误：" + err.Error(),
-			})
-			return
-		}
-		channelTag.Proxy = common.GetPointer[string](normalized)
-	}
-	if channelTag.HTTP2ConnectionShards != nil {
-		shards := *channelTag.HTTP2ConnectionShards
-		if shards < 1 || shards > dto.MaxHTTP2ConnectionShards {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "HTTP/2 分片数量必须在 1-8 之间",
-			})
-			return
-		}
-	}
-	if channelTag.HTTPProtocol != nil {
-		protocol := strings.ToLower(strings.TrimSpace(*channelTag.HTTPProtocol))
-		settings := dto.ChannelSettings{HTTPProtocol: protocol}
-		if channelTag.HTTP2ConnectionShards != nil {
-			settings.HTTP2ConnectionShards = *channelTag.HTTP2ConnectionShards
-		}
-		if err := settings.ValidateHTTPTransport(); err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "HTTP 协议设置错误：" + err.Error(),
-			})
-			return
-		}
-		channelTag.HTTPProtocol = common.GetPointer[string](protocol)
-	}
-	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ParamOverride, channelTag.HeaderOverride, channelTag.Proxy, channelTag.HTTPProtocol, channelTag.HTTP2ConnectionShards)
-	if err != nil {
+	if err := model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, fields); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	model.InitChannelCache()
-	if channelTag.Proxy != nil || channelTag.HTTPProtocol != nil || channelTag.HTTP2ConnectionShards != nil {
+	if fields.Proxy != nil || fields.HTTPProtocol != nil || fields.HTTP2ConnectionShards != nil {
 		service.ResetProxyClientCache()
 	}
 	recordManageAudit(c, "channel.tag_edit", map[string]any{
 		"tag":              channelTag.Tag,
-		"proxy_changed":    channelTag.Proxy != nil,
-		"protocol_changed": channelTag.HTTPProtocol != nil || channelTag.HTTP2ConnectionShards != nil,
+		"proxy_changed":    fields.Proxy != nil,
+		"protocol_changed": fields.HTTPProtocol != nil || fields.HTTP2ConnectionShards != nil,
+		"settings_changed": fields.Settings != nil,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -1601,14 +1720,11 @@ func FetchModels(c *gin.Context) {
 
 // ChannelBatchEditRequest scopes a batch edit to an explicit set of channel ids,
 // unlike EditTagChannels which targets every channel sharing a tag.
+// ChannelBatchEditRequest scopes a batch edit to an explicit set of channel ids,
+// unlike EditTagChannels which targets every channel sharing a tag.
 type ChannelBatchEditRequest struct {
-	Ids                   []int   `json:"ids"`
-	ModelMapping          *string `json:"model_mapping"`
-	Models                *string `json:"models"`
-	Groups                *string `json:"groups"`
-	Proxy                 *string `json:"proxy"`
-	HTTPProtocol          *string `json:"http_protocol"`
-	HTTP2ConnectionShards *int    `json:"http2_connection_shards"`
+	Ids []int `json:"ids"`
+	ChannelBatchAttributes
 }
 
 func EditChannelBatch(c *gin.Context) {
@@ -1620,76 +1736,38 @@ func EditChannelBatch(c *gin.Context) {
 		})
 		return
 	}
-	if req.ModelMapping == nil && req.Models == nil && req.Groups == nil &&
-		req.Proxy == nil && req.HTTPProtocol == nil && req.HTTP2ConnectionShards == nil {
+	fields, sensitive, hasValues, err := req.ChannelBatchAttributes.toModelFields()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if !hasValues {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "参数错误",
 		})
 		return
 	}
-	// proxy / HTTP protocol / shards live in the sensitive setting field.
-	if (req.Proxy != nil || req.HTTPProtocol != nil || req.HTTP2ConnectionShards != nil) &&
-		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+	// Every setting field is sensitive; proxy / HTTP protocol / shards live in
+	// the same setting JSON.
+	if sensitive && !authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
 		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
-	if req.Proxy != nil {
-		trimmed := strings.TrimSpace(*req.Proxy)
-		if trimmed != "" {
-			if err := service.ValidateProxyURL(trimmed); err != nil {
-				c.JSON(http.StatusOK, gin.H{
-					"success": false,
-					"message": "代理地址格式错误：" + err.Error(),
-				})
-				return
-			}
-		}
-		normalized, err := service.NormalizeProxyURL(trimmed)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "代理地址格式错误：" + err.Error(),
-			})
-			return
-		}
-		req.Proxy = common.GetPointer[string](normalized)
-	}
-	if req.HTTP2ConnectionShards != nil {
-		shards := *req.HTTP2ConnectionShards
-		if shards < 1 || shards > dto.MaxHTTP2ConnectionShards {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "HTTP/2 分片数量必须在 1-8 之间",
-			})
-			return
-		}
-	}
-	if req.HTTPProtocol != nil {
-		protocol := strings.ToLower(strings.TrimSpace(*req.HTTPProtocol))
-		settings := dto.ChannelSettings{HTTPProtocol: protocol}
-		if req.HTTP2ConnectionShards != nil {
-			settings.HTTP2ConnectionShards = *req.HTTP2ConnectionShards
-		}
-		if err := settings.ValidateHTTPTransport(); err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "HTTP 协议设置错误：" + err.Error(),
-			})
-			return
-		}
-		req.HTTPProtocol = common.GetPointer[string](protocol)
-	}
-	if err := model.EditChannelByIDs(req.Ids, req.ModelMapping, req.Models, req.Groups, req.Proxy, req.HTTPProtocol, req.HTTP2ConnectionShards); err != nil {
+	if err := model.EditChannelByIDs(req.Ids, fields); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	model.InitChannelCache()
-	if req.Proxy != nil || req.HTTPProtocol != nil || req.HTTP2ConnectionShards != nil {
+	if fields.Proxy != nil || fields.HTTPProtocol != nil || fields.HTTP2ConnectionShards != nil {
 		service.ResetProxyClientCache()
 	}
 	recordManageAudit(c, "channel.batch_edit", map[string]any{
-		"count": len(req.Ids),
+		"count":            len(req.Ids),
+		"settings_changed": fields.Settings != nil,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

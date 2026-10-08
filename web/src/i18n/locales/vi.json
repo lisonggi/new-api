@@ -6909,6 +6909,17 @@
     "Retry match type": "Loại khớp thử lại",
     "Candidate rule": "Quy tắc ứng viên",
     "Case": "Hoa thường",
-    "Match": "Khớp"
+    "Match": "Khớp",
+    "Merge": "Hợp nhất",
+    "Models mode": "Chế độ mô hình",
+    "Model mapping mode": "Chế độ ánh xạ mô hình",
+    "Groups mode": "Chế độ nhóm",
+    "Channel Settings": "Cài đặt kênh",
+    "Provider-agnostic request handling settings. Each one is only written when you turn it on.": "Cài đặt xử lý yêu cầu độc lập với nhà cung cấp. Chỉ những mục được bật mới được ghi.",
+    "System prompt override": "Ghi đè lời nhắc hệ thống",
+    "Replace the system prompt sent by the client instead of appending to it.": "Thay thế lời nhắc hệ thống do ứng dụng gửi thay vì nối thêm.",
+    "Leave empty to clear the stored system prompt": "Để trống để xóa lời nhắc hệ thống đã lưu",
+    "First response timeout mode": "Chế độ thời gian chờ phản hồi đầu tiên",
+    "Per-model time-to-first-byte timeout (milliseconds), tiered by prompt context size. Model keys use the requested model name, not the mapped upstream model.": "Thời gian chờ byte đầu tiên theo mô hình (mili giây), phân tầng theo kích thước ngữ cảnh. Khóa mô hình dùng tên mô hình được yêu cầu, không phải mô hình thượng nguồn đã ánh xạ."
   }
 }

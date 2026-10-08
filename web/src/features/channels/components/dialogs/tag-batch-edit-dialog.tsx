@@ -74,13 +74,13 @@ export function TagBatchEditDialog(props: TagBatchEditDialogProps) {
 
     setIsSaving(true)
     try {
-      const params: Record<string, string | number | undefined> = {
+      const params: TagOperationParams = {
         tag: currentTag,
+        ...buildChannelAttributeParams(changes),
       }
       if (tagEnabled && newTag !== currentTag) {
         params.new_tag = newTag
       }
-      Object.assign(params, buildChannelAttributeParams(changes))
 
       // Nothing but the tag selector was chosen: there is nothing to write.
       if (Object.keys(params).length === 1) {
@@ -88,9 +88,7 @@ export function TagBatchEditDialog(props: TagBatchEditDialogProps) {
         return
       }
 
-      const response = await editTagChannels(
-        params as unknown as TagOperationParams
-      )
+      const response = await editTagChannels(params)
       if (response.success) {
         toast.success(t('Tag updated successfully'))
         queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })

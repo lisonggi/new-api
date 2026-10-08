@@ -32,15 +32,19 @@ test('a fresh change set turns every attribute off', () => {
   expect(changes.httpProtocol.enabled).toBe(false)
   expect(changes.shards.enabled).toBe(false)
   expect(changes.proxy.enabled).toBe(false)
+  expect(changes.settings.reasoningContentBackfill.enabled).toBe(false)
+  expect(changes.settings.modelFirstResponseTimeout.enabled).toBe(false)
+  expect(changes.settings.errorRetryPolicy.enabled).toBe(false)
   expect(buildChannelAttributeParams(changes)).toEqual({})
 })
 
 test('only enabled attributes are built into the request params', () => {
   const changes = emptyChannelAttributeChanges()
-  changes.models = { enabled: true, value: ' gpt-4o,claude-3 ' }
+  changes.models = { enabled: true, mode: 'append', value: ' gpt-4o,claude-3 ' }
   changes.proxy = { enabled: true, mode: 'set', address: 'http://p.local:1' }
   expect(buildChannelAttributeParams(changes)).toEqual({
     models: 'gpt-4o,claude-3',
+    models_mode: 'append',
     proxy: 'http://p.local:1',
   })
 })
@@ -61,21 +65,52 @@ test('protocol and shards are built only when enabled', () => {
   })
 })
 
-test('an enabled attribute with an empty value is rejected', () => {
+test('model mapping and groups carry their replace/merge mode', () => {
   const changes = emptyChannelAttributeChanges()
-  changes.models = { enabled: true, value: '   ' }
-  expect(validateChannelAttributeChanges(changes)).toBe(
-    'Model list is required'
-  )
+  changes.modelMapping = { enabled: true, mode: 'merge', value: '{"a":"b"}' }
+  changes.groups = { enabled: true, mode: 'append', value: ['vip'] }
+  expect(buildChannelAttributeParams(changes)).toEqual({
+    model_mapping: '{"a":"b"}',
+    model_mapping_mode: 'merge',
+    groups: 'vip',
+    groups_mode: 'append',
+  })
+})
+
+test('channel settings are only built when enabled', () => {
+  const changes = emptyChannelAttributeChanges()
+  changes.settings.reasoningContentBackfill = { enabled: true, value: true }
+  changes.settings.systemPrompt = { enabled: true, value: 'be nice' }
+  changes.settings.modelFirstResponseTimeout = {
+    enabled: true,
+    mode: 'merge',
+    value: '{"gpt-4o":[{"context_tokens":1000,"timeout_ms":500}]}',
+  }
+  expect(buildChannelAttributeParams(changes)).toEqual({
+    settings: {
+      reasoning_content_backfill: true,
+      system_prompt: 'be nice',
+      model_first_response_timeout: {
+        'gpt-4o': [{ context_tokens: 1000, timeout_ms: 500 }],
+      },
+      model_first_response_timeout_mode: 'merge',
+    },
+  })
+})
+
+test('an enabled attribute with an empty value is rejected', () => {
+  const models = emptyChannelAttributeChanges()
+  models.models = { enabled: true, mode: 'replace', value: '   ' }
+  expect(validateChannelAttributeChanges(models)).toBe('Model list is required')
 
   const mapping = emptyChannelAttributeChanges()
-  mapping.modelMapping = { enabled: true, value: '' }
+  mapping.modelMapping = { enabled: true, mode: 'replace', value: '' }
   expect(validateChannelAttributeChanges(mapping)).toBe(
     'Model mapping is required'
   )
 
   const groups = emptyChannelAttributeChanges()
-  groups.groups = { enabled: true, value: [] }
+  groups.groups = { enabled: true, mode: 'replace', value: [] }
   expect(validateChannelAttributeChanges(groups)).toBe(
     'Select at least one group'
   )
@@ -85,20 +120,56 @@ test('an enabled attribute with an empty value is rejected', () => {
   expect(validateChannelAttributeChanges(proxy)).toBe(
     'Proxy address is required'
   )
+
+  const timeout = emptyChannelAttributeChanges()
+  timeout.settings.modelFirstResponseTimeout = {
+    enabled: true,
+    mode: 'replace',
+    value: '',
+  }
+  expect(validateChannelAttributeChanges(timeout)).toBe(
+    'Model first response timeout must be a JSON object mapping model names to tiers'
+  )
+
+  const policy = emptyChannelAttributeChanges()
+  policy.settings.errorRetryPolicy = { enabled: true, value: '' }
+  expect(validateChannelAttributeChanges(policy)).toBe(
+    'Error retry policy must be a valid policy object'
+  )
 })
 
 test('invalid model mapping JSON is rejected', () => {
   const changes = emptyChannelAttributeChanges()
-  changes.modelMapping = { enabled: true, value: '{not json' }
+  changes.modelMapping = { enabled: true, mode: 'replace', value: '{not json' }
   expect(validateChannelAttributeChanges(changes)).toBe(
     'Model mapping must be valid JSON'
   )
 })
 
+test('an out-of-range first response timeout tier is rejected', () => {
+  const changes = emptyChannelAttributeChanges()
+  changes.settings.modelFirstResponseTimeout = {
+    enabled: true,
+    mode: 'replace',
+    value: '{"gpt-4o":[{"context_tokens":0,"timeout_ms":500}]}',
+  }
+  expect(validateChannelAttributeChanges(changes)).toBe(
+    'Model first response timeout must be a JSON object mapping model names to tiers'
+  )
+})
+
 test('a valid change set passes validation', () => {
   const changes = emptyChannelAttributeChanges()
-  changes.models = { enabled: true, value: 'gpt-4o' }
-  changes.modelMapping = { enabled: true, value: '{"gpt-4o":"upstream"}' }
+  changes.models = { enabled: true, mode: 'replace', value: 'gpt-4o' }
+  changes.modelMapping = {
+    enabled: true,
+    mode: 'merge',
+    value: '{"gpt-4o":"upstream"}',
+  }
   changes.proxy = { enabled: true, mode: 'clear', address: '' }
+  changes.settings.errorRetryPolicy = {
+    enabled: true,
+    value: '{"enabled":true}',
+  }
   expect(validateChannelAttributeChanges(changes)).toBeNull()
 })

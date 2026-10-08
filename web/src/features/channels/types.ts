@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
+import type { ChannelAttributeParams } from './lib/channel-attribute-changes'
 import type { ChannelErrorRetryPolicy } from './lib/channel-error-retry'
 
 // ============================================================================
@@ -345,17 +346,11 @@ export interface BatchSetTagParams {
   tag: string | null
 }
 
-export interface TagOperationParams {
+export interface TagOperationParams extends ChannelAttributeParams {
   tag: string
   new_tag?: string
   priority?: number
   weight?: number
-  model_mapping?: string
-  models?: string
-  groups?: string
-  proxy?: string
-  http_protocol?: string
-  http2_connection_shards?: number
 }
 
 // ============================================================================

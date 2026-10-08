@@ -20,6 +20,7 @@ import { getGroups as getUserGroups } from '@/features/users/api'
 import { api, type ApiRequestConfig } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
+import type { ChannelAttributeParams } from './lib/channel-attribute-changes'
 import type { InferenceStatus } from './lib/inference-status'
 import type {
   AddChannelRequest,
@@ -565,15 +566,9 @@ export async function editTagChannels(
 /**
  * Edit an explicit set of channels by id (multi-select batch edit).
  */
-export async function editChannelBatch(params: {
-  ids: number[]
-  models?: string
-  model_mapping?: string
-  groups?: string
-  proxy?: string
-  http_protocol?: string
-  http2_connection_shards?: number
-}): Promise<{ success: boolean; message?: string }> {
+export async function editChannelBatch(
+  params: ChannelAttributeParams & { ids: number[] }
+): Promise<{ success: boolean; message?: string }> {
   const res = await api.put('/api/channel/batch', params, channelActionConfig())
   return res.data
 }

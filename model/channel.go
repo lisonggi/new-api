@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand"
 	"strings"
 	"sync"
@@ -862,20 +863,8 @@ func DisableChannelByTag(tag string) error {
 	return err
 }
 
-func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, paramOverride *string, headerOverride *string, proxy *string, httpProtocol *string, http2ConnectionShards *int) error {
-	fields := channelBatchFields{
-		ModelMapping:          modelMapping,
-		Models:                models,
-		Group:                 group,
-		Priority:              priority,
-		Weight:                weight,
-		ParamOverride:         paramOverride,
-		HeaderOverride:        headerOverride,
-		Proxy:                 proxy,
-		HTTPProtocol:          httpProtocol,
-		HTTP2ConnectionShards: http2ConnectionShards,
-	}
-	updateData, shouldReCreateAbilities := fields.buildUpdateData()
+func EditChannelByTag(tag string, newTag *string, f ChannelBatchFields) error {
+	updateData := f.buildBulkUpdateData()
 	updatedTag := tag
 	// 如果 newTag 不为空且不等于 tag，则更新 tag
 	if newTag != nil && *newTag != tag {
@@ -885,47 +874,61 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 
 	// Collect the target ids before the bulk update: renaming the tag (including
 	// an empty new_tag, or merging into a tag that already exists) would
-	// otherwise re-select unrelated rows for the settings patch.
-	var settingTargetIds []int
-	if fields.touchesSettings() {
-		if err := DB.Model(&Channel{}).Where("tag = ?", tag).Pluck("id", &settingTargetIds).Error; err != nil {
+	// otherwise re-select unrelated rows for the per-channel writes.
+	var targetIds []int
+	if f.touchesSettings() || f.hasPerChannelColumns() {
+		if err := DB.Model(&Channel{}).Where("tag = ?", tag).Pluck("id", &targetIds).Error; err != nil {
 			return err
 		}
 	}
 
-	err := DB.Model(&Channel{}).Where("tag = ?", tag).Updates(updateData).Error
-	if err != nil {
+	if err := DB.Model(&Channel{}).Where("tag = ?", tag).Updates(updateData).Error; err != nil {
 		return err
 	}
-	if err := patchChannelBatchSettings(settingTargetIds, fields); err != nil {
-		return err
+	if f.hasPerChannelColumns() {
+		if err := patchChannelBatchColumns(targetIds, f); err != nil {
+			return err
+		}
 	}
-	if shouldReCreateAbilities {
+	if f.touchesSettings() {
+		if err := patchChannelBatchSettings(targetIds, f); err != nil {
+			return err
+		}
+	}
+	if f.shouldReCreateAbilities() {
 		channels, err := GetChannelsByTag(updatedTag, false, false)
 		if err == nil {
 			for _, channel := range channels {
-				err = channel.UpdateAbilities(nil)
-				if err != nil {
+				if err := channel.UpdateAbilities(nil); err != nil {
 					common.SysLog(fmt.Sprintf("failed to update abilities: channel_id=%d, tag=%s, error=%v", channel.Id, channel.GetTag(), err))
 				}
 			}
 		}
 	} else {
-		err := UpdateAbilityByTag(tag, newTag, priority, weight)
-		if err != nil {
+		if err := UpdateAbilityByTag(tag, newTag, f.Priority, f.Weight); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// channelBatchFields is the set of column/setting updates a batch edit can
-// apply to a set of channels. A nil pointer leaves that field untouched, which
-// keeps "only write what was asked for" true for every caller.
-type channelBatchFields struct {
-	ModelMapping          *string
+// ChannelBatchFields is the set of column/setting updates a batch edit can apply
+// to a set of channels. A nil pointer leaves that field untouched, which keeps
+// "only write what was asked for" true for every caller.
+//
+// Models, ModelMapping and Group carry a mode because an administrator may want
+// to add to the current value instead of replacing it:
+//   - ModelsMode / GroupMode: "" or "replace" overwrites; "append" unions with
+//     the current comma-separated list.
+//   - ModelMappingMode: "" or "replace" overwrites; "merge" overlays the new
+//     entries on the current JSON object.
+type ChannelBatchFields struct {
 	Models                *string
+	ModelsMode            string
+	ModelMapping          *string
+	ModelMappingMode      string
 	Group                 *string
+	GroupMode             string
 	Priority              *int64
 	Weight                *uint
 	ParamOverride         *string
@@ -933,23 +936,58 @@ type channelBatchFields struct {
 	Proxy                 *string
 	HTTPProtocol          *string
 	HTTP2ConnectionShards *int
+	Settings              *ChannelBatchSettings
+	OtherSettings         *ChannelBatchOtherSettings
 }
 
-// buildUpdateData maps the requested fields onto a Channel used as an Updates
-// payload. The bool reports whether the channel model/group changed, which
-// requires rebuilding the routing abilities.
-func (f channelBatchFields) buildUpdateData() (Channel, bool) {
+// ChannelBatchSettings is a partial setting-JSON patch. A nil field leaves the
+// stored value untouched; a non-nil field is written. ModelFirstResponseTimeout
+// additionally honors a replace/merge mode.
+type ChannelBatchSettings struct {
+	ReasoningContentBackfill          *bool
+	ResponsesReasoningContentBackfill *bool
+	IgnoreResponseModelMismatch       *bool
+	ThinkingToContent                 *bool
+	SystemPrompt                      *string
+	SystemPromptOverride              *bool
+	ModelFirstResponseTimeout         *map[string][]dto.FirstResponseTimeoutTier
+	ModelFirstResponseTimeoutMode     string
+	ErrorRetryPolicy                  *dto.ChannelErrorRetryPolicy
+}
+
+// ChannelBatchOtherSettings is a partial ChannelOtherSettings (the "settings"
+// column) patch. Only the fields a batch edit can change are listed.
+type ChannelBatchOtherSettings struct {
+	DisableTaskPollingSleep *bool
+}
+
+// isEmpty reports whether the patch carries no field, so a present-but-empty
+// settings object never triggers a needless setting rewrite.
+func (s *ChannelBatchSettings) isEmpty() bool {
+	if s == nil {
+		return true
+	}
+	return s.ReasoningContentBackfill == nil &&
+		s.ResponsesReasoningContentBackfill == nil &&
+		s.IgnoreResponseModelMismatch == nil &&
+		s.ThinkingToContent == nil &&
+		s.SystemPrompt == nil &&
+		s.SystemPromptOverride == nil &&
+		s.ModelFirstResponseTimeout == nil &&
+		s.ErrorRetryPolicy == nil
+}
+
+// buildBulkUpdateData maps the replace-mode column fields onto a Channel used as
+// an Updates payload. Append/merge fields are applied per channel instead.
+func (f ChannelBatchFields) buildBulkUpdateData() Channel {
 	updateData := Channel{}
-	shouldReCreateAbilities := false
-	if f.ModelMapping != nil {
+	if f.ModelMapping != nil && f.ModelMappingMode != "merge" {
 		updateData.ModelMapping = f.ModelMapping
 	}
-	if f.Models != nil && *f.Models != "" {
-		shouldReCreateAbilities = true
+	if f.Models != nil && *f.Models != "" && f.ModelsMode != "append" {
 		updateData.Models = *f.Models
 	}
-	if f.Group != nil && *f.Group != "" {
-		shouldReCreateAbilities = true
+	if f.Group != nil && *f.Group != "" && f.GroupMode != "append" {
 		updateData.Group = *f.Group
 	}
 	if f.Priority != nil {
@@ -964,21 +1002,110 @@ func (f channelBatchFields) buildUpdateData() (Channel, bool) {
 	if f.HeaderOverride != nil {
 		updateData.HeaderOverride = f.HeaderOverride
 	}
-	return updateData, shouldReCreateAbilities
+	return updateData
+}
+
+// hasPerChannelColumns reports whether models/group/model_mapping need a
+// per-channel read-modify-write because the caller asked to append/merge instead
+// of replace.
+func (f ChannelBatchFields) hasPerChannelColumns() bool {
+	return (f.Models != nil && f.ModelsMode == "append") ||
+		(f.Group != nil && f.GroupMode == "append") ||
+		(f.ModelMapping != nil && f.ModelMappingMode == "merge")
+}
+
+// shouldReCreateAbilities reports whether the routing abilities must be rebuilt,
+// which any change to the served model list or the channel group requires.
+func (f ChannelBatchFields) shouldReCreateAbilities() bool {
+	return (f.Models != nil && *f.Models != "") || (f.Group != nil && *f.Group != "")
 }
 
 // touchesSettings reports whether the batch needs the per-channel setting
-// rewrite, because proxy / HTTP protocol / HTTP2 shards live inside the setting
-// JSON and cannot be updated with a column-level UPDATE.
-func (f channelBatchFields) touchesSettings() bool {
-	return f.Proxy != nil || f.HTTPProtocol != nil || f.HTTP2ConnectionShards != nil
+// rewrite, because proxy / HTTP protocol / HTTP2 shards and every
+// ChannelBatchSettings field live inside the setting JSON and cannot be updated
+// with a column-level UPDATE.
+func (f ChannelBatchFields) touchesSettings() bool {
+	return f.Proxy != nil || f.HTTPProtocol != nil || f.HTTP2ConnectionShards != nil ||
+		(f.Settings != nil && !f.Settings.isEmpty()) || f.OtherSettings != nil
+}
+
+// patchChannelBatchColumns applies the append/merge column updates one channel
+// at a time, because each channel's new value depends on its current value.
+func patchChannelBatchColumns(ids []int, f ChannelBatchFields) error {
+	for _, channelId := range ids {
+		var channel Channel
+		if err := DB.First(&channel, channelId).Error; err != nil {
+			return err
+		}
+		updates := map[string]any{}
+		if f.Models != nil && f.ModelsMode == "append" {
+			updates["models"] = unionCommaList(channel.Models, *f.Models)
+		}
+		if f.Group != nil && f.GroupMode == "append" {
+			updates["group"] = unionCommaList(channel.Group, *f.Group)
+		}
+		if f.ModelMapping != nil && f.ModelMappingMode == "merge" {
+			merged, err := mergeModelMapping(channel.ModelMapping, *f.ModelMapping)
+			if err != nil {
+				return err
+			}
+			updates["model_mapping"] = merged
+		}
+		if len(updates) == 0 {
+			continue
+		}
+		if err := DB.Model(&Channel{}).Where("id = ?", channel.Id).Updates(updates).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// unionCommaList appends the comma-separated items of added to existing,
+// trimming blanks and dropping duplicates while keeping the existing order first.
+func unionCommaList(existing string, added string) string {
+	seen := make(map[string]struct{})
+	items := make([]string, 0)
+	for part := range strings.SplitSeq(existing+","+added, ",") {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		items = append(items, item)
+	}
+	return strings.Join(items, ",")
+}
+
+// mergeModelMapping overlays the added mapping entries on top of the stored
+// mapping. A missing or unparsable stored value is treated as an empty object.
+func mergeModelMapping(existing *string, added string) (string, error) {
+	merged := map[string]any{}
+	if existing != nil && strings.TrimSpace(*existing) != "" {
+		if err := common.UnmarshalJsonStr(*existing, &merged); err != nil {
+			merged = map[string]any{}
+		}
+	}
+	incoming := map[string]any{}
+	if err := common.UnmarshalJsonStr(added, &incoming); err != nil {
+		return "", err
+	}
+	maps.Copy(merged, incoming)
+	data, err := common.Marshal(merged)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // patchChannelBatchSettings rewrites the setting JSON of the given channels.
 // Every channel is re-read first so the rewrite stays consistent with the other
 // batch fields and keeps every column (the credential included) that GetSetting
 // can persist through Save.
-func patchChannelBatchSettings(ids []int, f channelBatchFields) error {
+func patchChannelBatchSettings(ids []int, f ChannelBatchFields) error {
 	for _, channelId := range ids {
 		var channel Channel
 		if err := DB.First(&channel, channelId).Error; err != nil {
@@ -1004,6 +1131,42 @@ func patchChannelBatchSettings(ids []int, f channelBatchFields) error {
 			// http1 and multiple HTTP/2 shards are mutually exclusive.
 			setting.HTTP2ConnectionShards = 1
 		}
+		if f.Settings != nil {
+			patch := f.Settings
+			if patch.ReasoningContentBackfill != nil {
+				setting.ReasoningContentBackfill = *patch.ReasoningContentBackfill
+			}
+			if patch.ResponsesReasoningContentBackfill != nil {
+				setting.ResponsesReasoningContentBackfill = *patch.ResponsesReasoningContentBackfill
+			}
+			if patch.IgnoreResponseModelMismatch != nil {
+				setting.IgnoreResponseModelMismatch = *patch.IgnoreResponseModelMismatch
+			}
+			if patch.ThinkingToContent != nil {
+				setting.ThinkingToContent = *patch.ThinkingToContent
+			}
+			if patch.SystemPrompt != nil {
+				setting.SystemPrompt = *patch.SystemPrompt
+			}
+			if patch.SystemPromptOverride != nil {
+				setting.SystemPromptOverride = *patch.SystemPromptOverride
+			}
+			if patch.ModelFirstResponseTimeout != nil {
+				if patch.ModelFirstResponseTimeoutMode == "merge" {
+					merged := setting.ModelFirstResponseTimeout
+					if merged == nil {
+						merged = map[string][]dto.FirstResponseTimeoutTier{}
+					}
+					maps.Copy(merged, *patch.ModelFirstResponseTimeout)
+					setting.ModelFirstResponseTimeout = merged
+				} else {
+					setting.ModelFirstResponseTimeout = *patch.ModelFirstResponseTimeout
+				}
+			}
+			if patch.ErrorRetryPolicy != nil {
+				setting.ErrorRetryPolicy = patch.ErrorRetryPolicy
+			}
+		}
 		if err := channel.SetSetting(setting); err != nil {
 			return err
 		}
@@ -1013,36 +1176,42 @@ func patchChannelBatchSettings(ids []int, f channelBatchFields) error {
 		if err := DB.Model(&Channel{}).Where("id = ?", channel.Id).Update("setting", *channel.Setting).Error; err != nil {
 			return err
 		}
+		if f.OtherSettings != nil {
+			other := channel.GetOtherSettings()
+			if f.OtherSettings.DisableTaskPollingSleep != nil {
+				other.DisableTaskPollingSleep = *f.OtherSettings.DisableTaskPollingSleep
+			}
+			channel.SetOtherSettings(other)
+			if err := DB.Model(&Channel{}).Where("id = ?", channel.Id).Update("settings", channel.OtherSettings).Error; err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
 // EditChannelByIDs applies the same field semantics as EditChannelByTag but
 // scopes every write to the given channel ids, so an administrator can batch
-// edit an arbitrary selection instead of a whole tag. It never renames the tag
-// and never touches priority/weight/override fields.
-func EditChannelByIDs(ids []int, modelMapping *string, models *string, group *string, proxy *string, httpProtocol *string, http2ConnectionShards *int) error {
+// edit an arbitrary selection instead of a whole tag. It never renames the tag.
+func EditChannelByIDs(ids []int, f ChannelBatchFields) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	fields := channelBatchFields{
-		ModelMapping:          modelMapping,
-		Models:                models,
-		Group:                 group,
-		Proxy:                 proxy,
-		HTTPProtocol:          httpProtocol,
-		HTTP2ConnectionShards: http2ConnectionShards,
-	}
-	updateData, shouldReCreateAbilities := fields.buildUpdateData()
+	updateData := f.buildBulkUpdateData()
 	if err := DB.Model(&Channel{}).Where("id IN ?", ids).Updates(updateData).Error; err != nil {
 		return err
 	}
-	if fields.touchesSettings() {
-		if err := patchChannelBatchSettings(ids, fields); err != nil {
+	if f.hasPerChannelColumns() {
+		if err := patchChannelBatchColumns(ids, f); err != nil {
 			return err
 		}
 	}
-	if shouldReCreateAbilities {
+	if f.touchesSettings() {
+		if err := patchChannelBatchSettings(ids, f); err != nil {
+			return err
+		}
+	}
+	if f.shouldReCreateAbilities() {
 		for _, id := range ids {
 			var channel Channel
 			if err := DB.First(&channel, id).Error; err != nil {

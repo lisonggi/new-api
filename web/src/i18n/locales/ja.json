@@ -6909,6 +6909,17 @@
     "Retry match type": "再試行一致タイプ",
     "Candidate rule": "候補ルール",
     "Case": "大文字小文字",
-    "Match": "一致"
+    "Match": "一致",
+    "Merge": "マージ",
+    "Models mode": "モデルのモード",
+    "Model mapping mode": "モデルマッピングのモード",
+    "Groups mode": "グループのモード",
+    "Channel Settings": "チャネル設定",
+    "Provider-agnostic request handling settings. Each one is only written when you turn it on.": "プロバイダーに依存しないリクエスト処理設定。オンにした項目だけが書き込まれます。",
+    "System prompt override": "システムプロンプトの上書き",
+    "Replace the system prompt sent by the client instead of appending to it.": "クライアントが送信したシステムプロンプトを追記ではなく置き換えます。",
+    "Leave empty to clear the stored system prompt": "空欄にすると保存されたシステムプロンプトを消去します",
+    "First response timeout mode": "初回応答タイムアウトのモード",
+    "Per-model time-to-first-byte timeout (milliseconds), tiered by prompt context size. Model keys use the requested model name, not the mapped upstream model.": "モデルごとの初回バイトまでのタイムアウト（ミリ秒）。プロンプトのコンテキストサイズで段階分けされます。モデルキーは要求されたモデル名を使用し、マッピング後の上流モデルではありません。"
   }
 }

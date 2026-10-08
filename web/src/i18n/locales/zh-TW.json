@@ -6909,6 +6909,17 @@
     "Retry match type": "重試匹配類型",
     "Candidate rule": "候選規則",
     "Case": "大小寫",
-    "Match": "符合"
+    "Match": "符合",
+    "Merge": "合併",
+    "Models mode": "模型處理方式",
+    "Model mapping mode": "模型映射處理方式",
+    "Groups mode": "分組處理方式",
+    "Channel Settings": "頻道設定",
+    "Provider-agnostic request handling settings. Each one is only written when you turn it on.": "與供應商無關的請求處理設定。只有開啟開關的項目才會被寫入。",
+    "System prompt override": "系統提示詞覆蓋",
+    "Replace the system prompt sent by the client instead of appending to it.": "取代客戶端傳送的系統提示詞，而非附加。",
+    "Leave empty to clear the stored system prompt": "留空表示清除已儲存的系統提示詞",
+    "First response timeout mode": "首字逾時處理方式",
+    "Per-model time-to-first-byte timeout (milliseconds), tiered by prompt context size. Model keys use the requested model name, not the mapped upstream model.": "依模型設定的首次位元組逾時（毫秒），依提示上下文大小分層。模型鍵使用請求的模型名稱，而非映射後的上游模型。"
   }
 }

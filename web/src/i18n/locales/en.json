@@ -6909,6 +6909,17 @@
     "Retry match type": "Retry match type",
     "Candidate rule": "Candidate rule",
     "Case": "Case",
-    "Match": "Match"
+    "Match": "Match",
+    "Merge": "Merge",
+    "Models mode": "Models mode",
+    "Model mapping mode": "Model mapping mode",
+    "Groups mode": "Groups mode",
+    "Channel Settings": "Channel Settings",
+    "Provider-agnostic request handling settings. Each one is only written when you turn it on.": "Provider-agnostic request handling settings. Each one is only written when you turn it on.",
+    "System prompt override": "System prompt override",
+    "Replace the system prompt sent by the client instead of appending to it.": "Replace the system prompt sent by the client instead of appending to it.",
+    "Leave empty to clear the stored system prompt": "Leave empty to clear the stored system prompt",
+    "First response timeout mode": "First response timeout mode",
+    "Per-model time-to-first-byte timeout (milliseconds), tiered by prompt context size. Model keys use the requested model name, not the mapped upstream model.": "Per-model time-to-first-byte timeout (milliseconds), tiered by prompt context size. Model keys use the requested model name, not the mapped upstream model."
   }
 }

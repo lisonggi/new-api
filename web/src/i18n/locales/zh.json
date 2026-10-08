@@ -6909,6 +6909,17 @@
     "Retry match type": "重试匹配类型",
     "Candidate rule": "候选规则",
     "Case": "大小写",
-    "Match": "匹配"
+    "Match": "匹配",
+    "Merge": "合并",
+    "Models mode": "模型处理方式",
+    "Model mapping mode": "模型映射处理方式",
+    "Groups mode": "分组处理方式",
+    "Channel Settings": "渠道设置",
+    "Provider-agnostic request handling settings. Each one is only written when you turn it on.": "与供应商无关的请求处理设置。只有打开开关的项才会被写入。",
+    "System prompt override": "系统提示词覆盖",
+    "Replace the system prompt sent by the client instead of appending to it.": "替换客户端发送的系统提示词，而不是追加。",
+    "Leave empty to clear the stored system prompt": "留空表示清除已存储的系统提示词",
+    "First response timeout mode": "首字超时处理方式",
+    "Per-model time-to-first-byte timeout (milliseconds), tiered by prompt context size. Model keys use the requested model name, not the mapped upstream model.": "按模型设置的首次字节超时（毫秒），按提示上下文大小分层。模型键使用请求的模型名称，而非映射后的上游模型。"
   }
 }

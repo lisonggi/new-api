@@ -185,7 +185,7 @@ function isOptionalStatusCodeMapping(value: string | undefined): boolean {
 // that still converts to a time.Duration without overflowing (~292 years).
 const MAX_FIRST_RESPONSE_TIMEOUT_MS = 9223372036854
 
-function isOptionalModelFirstResponseTimeout(
+export function isOptionalModelFirstResponseTimeout(
   value: string | undefined
 ): boolean {
   try {

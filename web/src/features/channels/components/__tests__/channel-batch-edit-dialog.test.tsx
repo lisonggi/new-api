@@ -82,6 +82,7 @@ test('turning on the proxy sends the selected ids and only the proxy', async () 
   const payload = vi.mocked(editChannelBatch).mock
     .calls[0][0] as unknown as Record<string, unknown>
   expect(payload).not.toHaveProperty('models')
+  expect(payload).not.toHaveProperty('settings')
 })
 
 test('turning on the model list sends the list for the selected ids', async () => {
@@ -100,6 +101,46 @@ test('turning on the model list sends the list for the selected ids', async () =
       models: 'gpt-4o',
     })
   )
+})
+
+test('append mode is sent with the model list', async () => {
+  const user = userEvent.setup()
+  await openDialog([5])
+
+  await user.click(screen.getByRole('switch', { name: 'Models' }))
+  await user.click(screen.getByRole('combobox', { name: 'Models mode' }))
+  await user.click(screen.getByRole('option', { name: 'Append' }))
+  await user.type(screen.getByRole('textbox', { name: 'Models' }), 'gpt-4.1')
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+  await waitFor(() =>
+    expect(editChannelBatch).toHaveBeenCalledWith({
+      ids: [5],
+      models: 'gpt-4.1',
+      models_mode: 'append',
+    })
+  )
+})
+
+test('a channel setting is sent inside settings, never as a column', async () => {
+  const user = userEvent.setup()
+  await openDialog([9])
+
+  await user.click(
+    screen.getByRole('switch', { name: 'Reasoning content backfill' })
+  )
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+  await waitFor(() =>
+    expect(editChannelBatch).toHaveBeenCalledWith({
+      ids: [9],
+      settings: { reasoning_content_backfill: true },
+    })
+  )
+  const payload = vi.mocked(editChannelBatch).mock
+    .calls[0][0] as unknown as Record<string, unknown>
+  expect(payload).not.toHaveProperty('models')
+  expect(payload).not.toHaveProperty('proxy')
 })
 
 test('enabling an attribute without a value blocks the save', async () => {

@@ -6909,6 +6909,17 @@
     "Retry match type": "Type de correspondance de nouvelle tentative",
     "Candidate rule": "Règle candidate",
     "Case": "Casse",
-    "Match": "Correspondance"
+    "Match": "Correspondance",
+    "Merge": "Fusionner",
+    "Models mode": "Mode des modèles",
+    "Model mapping mode": "Mode du mappage de modèles",
+    "Groups mode": "Mode des groupes",
+    "Channel Settings": "Paramètres du canal",
+    "Provider-agnostic request handling settings. Each one is only written when you turn it on.": "Paramètres de traitement des requêtes indépendants du fournisseur. Seuls les éléments activés sont écrits.",
+    "System prompt override": "Remplacement du prompt système",
+    "Replace the system prompt sent by the client instead of appending to it.": "Remplacer le prompt système envoyé par le client au lieu de l’ajouter.",
+    "Leave empty to clear the stored system prompt": "Laisser vide pour effacer le prompt système enregistré",
+    "First response timeout mode": "Mode du délai de première réponse",
+    "Per-model time-to-first-byte timeout (milliseconds), tiered by prompt context size. Model keys use the requested model name, not the mapped upstream model.": "Délai avant le premier octet par modèle (millisecondes), échelonné selon la taille du contexte du prompt. Les clés de modèle utilisent le nom demandé, pas le modèle amont mappé."
   }
 }

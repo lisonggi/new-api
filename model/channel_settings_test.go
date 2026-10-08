@@ -571,7 +571,7 @@ func TestEditChannelByTagPatchesChannelSettings(t *testing.T) {
 
 			proxy := "http://new-proxy.local:8080"
 			protocol := dto.HTTPProtocolHTTP1
-			require.NoError(t, EditChannelByTag("surplus-a", nil, nil, nil, nil, nil, nil, nil, nil, &proxy, &protocol, nil))
+			require.NoError(t, EditChannelByTag("surplus-a", nil, ChannelBatchFields{Proxy: &proxy, HTTPProtocol: &protocol}))
 
 			var gotA, gotB, gotC, gotE Channel
 			require.NoError(t, db.First(&gotA, channels[0].Id).Error)
@@ -602,7 +602,7 @@ func TestEditChannelByTagPatchesChannelSettings(t *testing.T) {
 			// More than one shard only means anything for HTTP/2, so it also
 			// lifts the HTTP/1.1 pin instead of storing a contradiction.
 			shards := 4
-			require.NoError(t, EditChannelByTag("surplus-a", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &shards))
+			require.NoError(t, EditChannelByTag("surplus-a", nil, ChannelBatchFields{HTTP2ConnectionShards: &shards}))
 			var gotA2 Channel
 			require.NoError(t, db.First(&gotA2, channels[0].Id).Error)
 			settingA2 := gotA2.GetSetting()
@@ -611,7 +611,7 @@ func TestEditChannelByTagPatchesChannelSettings(t *testing.T) {
 			assert.Equal(t, proxy, settingA2.Proxy, "a shard-only patch must leave the proxy alone")
 
 			cleared := ""
-			require.NoError(t, EditChannelByTag("other-tag", nil, nil, nil, nil, nil, nil, nil, nil, &cleared, nil, nil))
+			require.NoError(t, EditChannelByTag("other-tag", nil, ChannelBatchFields{Proxy: &cleared}))
 			var gotC2 Channel
 			require.NoError(t, db.First(&gotC2, channels[2].Id).Error)
 			assert.Empty(t, gotC2.GetSetting().Proxy, "an empty proxy patch must clear the stored proxy")
@@ -625,7 +625,7 @@ func TestEditChannelByTagPatchesChannelSettings(t *testing.T) {
 
 			mergeTarget := "target-tag"
 			mergeProxy := "http://merge.local:8080"
-			require.NoError(t, EditChannelByTag("source-tag", &mergeTarget, nil, nil, nil, nil, nil, nil, nil, &mergeProxy, nil, nil))
+			require.NoError(t, EditChannelByTag("source-tag", &mergeTarget, ChannelBatchFields{Proxy: &mergeProxy}))
 
 			var gotExisting, gotSource Channel
 			require.NoError(t, db.First(&gotExisting, existing.Id).Error)
@@ -693,7 +693,7 @@ func TestEditChannelByIDsPatchesChannelSettings(t *testing.T) {
 
 			proxy := "http://new-proxy.local:8080"
 			protocol := dto.HTTPProtocolHTTP1
-			require.NoError(t, EditChannelByIDs([]int{channels[0].Id, channels[1].Id, channels[3].Id}, nil, nil, nil, &proxy, &protocol, nil))
+			require.NoError(t, EditChannelByIDs([]int{channels[0].Id, channels[1].Id, channels[3].Id}, ChannelBatchFields{Proxy: &proxy, HTTPProtocol: &protocol}))
 
 			var gotA, gotB, gotC, gotE Channel
 			require.NoError(t, db.First(&gotA, channels[0].Id).Error)
@@ -722,7 +722,7 @@ func TestEditChannelByIDsPatchesChannelSettings(t *testing.T) {
 			// More than one shard only means anything for HTTP/2, so it also
 			// lifts the HTTP/1.1 pin instead of storing a contradiction.
 			shards := 4
-			require.NoError(t, EditChannelByIDs([]int{channels[0].Id}, nil, nil, nil, nil, nil, &shards))
+			require.NoError(t, EditChannelByIDs([]int{channels[0].Id}, ChannelBatchFields{HTTP2ConnectionShards: &shards}))
 			var gotA2 Channel
 			require.NoError(t, db.First(&gotA2, channels[0].Id).Error)
 			settingA2 := gotA2.GetSetting()
@@ -731,7 +731,7 @@ func TestEditChannelByIDsPatchesChannelSettings(t *testing.T) {
 			assert.Equal(t, proxy, settingA2.Proxy, "a shard-only patch must leave the proxy alone")
 
 			cleared := ""
-			require.NoError(t, EditChannelByIDs([]int{channels[2].Id}, nil, nil, nil, &cleared, nil, nil))
+			require.NoError(t, EditChannelByIDs([]int{channels[2].Id}, ChannelBatchFields{Proxy: &cleared}))
 			var gotC2 Channel
 			require.NoError(t, db.First(&gotC2, channels[2].Id).Error)
 			assert.Empty(t, gotC2.GetSetting().Proxy, "an empty proxy patch must clear the stored proxy")
@@ -739,12 +739,142 @@ func TestEditChannelByIDsPatchesChannelSettings(t *testing.T) {
 			// A model change must rebuild routing abilities for the selected
 			// channels and leave the rest of the columns/rows alone.
 			models := "gpt-4o,claude-3"
-			require.NoError(t, EditChannelByIDs([]int{channels[0].Id, channels[1].Id}, nil, &models, nil, nil, nil, nil))
+			require.NoError(t, EditChannelByIDs([]int{channels[0].Id, channels[1].Id}, ChannelBatchFields{Models: &models}))
 			var gotA3, gotC3 Channel
 			require.NoError(t, db.First(&gotA3, channels[0].Id).Error)
 			require.NoError(t, db.First(&gotC3, channels[2].Id).Error)
 			assert.Equal(t, models, gotA3.Models)
 			assert.Empty(t, gotC3.Models, "channels outside the id set must not receive models")
+		})
+	}
+}
+
+func TestEditChannelByIDsBatchModesAndSettings(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(filepath.Join(t.TempDir(), "id-modes.db"))
+			case "mysql":
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_MYSQL_DSN is not configured")
+				}
+				driver = mysql.Open(dsn)
+			case "postgres":
+				dsn := os.Getenv("TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_POSTGRES_DSN is not configured")
+				}
+				driver = postgres.Open(dsn)
+			}
+			db, err := gorm.Open(driver, &gorm.Config{NamingStrategy: schema.NamingStrategy{TablePrefix: "id_modes_test_"}})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+
+			previousDB, previousType := DB, common.MainDatabaseType()
+			DB = db
+			common.SetMainDatabaseType(common.DatabaseType(dialect))
+			initCol()
+			t.Cleanup(func() {
+				require.NoError(t, db.Migrator().DropTable(&Channel{}, &Ability{}))
+				DB = previousDB
+				common.SetMainDatabaseType(previousType)
+				initCol()
+				require.NoError(t, sqlDB.Close())
+			})
+			require.NoError(t, db.AutoMigrate(&Channel{}, &Ability{}))
+
+			group := "default"
+			mapping := `{"gpt-4o":"gpt-4o-mini"}`
+			channels := []*Channel{
+				{Type: 1, Key: "key-a", Name: "a", Status: common.ChannelStatusEnabled, Models: "gpt-4o", Group: group, ModelMapping: &mapping, Setting: common.GetPointer(`{"proxy":"http://keep.local:1"}`)},
+				{Type: 1, Key: "key-b", Name: "b", Status: common.ChannelStatusEnabled, Models: "claude-3", Group: group},
+				{Type: 1, Key: "key-c", Name: "c", Status: common.ChannelStatusEnabled, Models: "other-model", Group: group},
+			}
+			for _, channel := range channels {
+				require.NoError(t, db.Create(channel).Error)
+			}
+			a, b, c := channels[0].Id, channels[1].Id, channels[2].Id
+
+			// Append models: union with the current list, deduped, existing first.
+			addedModels := "gpt-4o,gpt-4.1"
+			require.NoError(t, EditChannelByIDs([]int{a, b}, ChannelBatchFields{Models: &addedModels, ModelsMode: "append"}))
+			var gotA, gotB, gotC Channel
+			require.NoError(t, db.First(&gotA, a).Error)
+			require.NoError(t, db.First(&gotB, b).Error)
+			require.NoError(t, db.First(&gotC, c).Error)
+			assert.Equal(t, "gpt-4o,gpt-4.1", gotA.Models)
+			assert.Equal(t, "claude-3,gpt-4o,gpt-4.1", gotB.Models)
+			assert.Equal(t, "other-model", gotC.Models, "unselected channels must keep their models")
+
+			// Merge model_mapping: overlay the new entries and keep the old ones.
+			addedMapping := `{"gpt-4.1":"upstream-41"}`
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{ModelMapping: &addedMapping, ModelMappingMode: "merge"}))
+			require.NoError(t, db.First(&gotA, a).Error)
+			mergedMapping := map[string]string{}
+			require.NoError(t, common.UnmarshalJsonStr(*gotA.ModelMapping, &mergedMapping))
+			assert.Equal(t, map[string]string{"gpt-4o": "gpt-4o-mini", "gpt-4.1": "upstream-41"}, mergedMapping)
+
+			// Append groups: union with the current list.
+			addedGroup := "vip"
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Group: &addedGroup, GroupMode: "append"}))
+			require.NoError(t, db.First(&gotA, a).Error)
+			assert.Equal(t, "default,vip", gotA.Group)
+
+			// Settings patch: booleans, string, JSON config and retry policy in
+			// the "setting" column.
+			backfill := true
+			prompt := "be nice"
+			promptOverride := true
+			timeout := map[string][]dto.FirstResponseTimeoutTier{
+				"gpt-4o": {{ContextTokens: 200000, TimeoutMs: 3000}},
+			}
+			policy := &dto.ChannelErrorRetryPolicy{
+				Enabled: true,
+				Rules: []dto.ChannelErrorRetryRule{
+					{ID: "r1", Enabled: true, Action: dto.ChannelErrorRetryActionRetry, StatusCodes: []int{500}},
+				},
+			}
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Settings: &ChannelBatchSettings{
+				ReasoningContentBackfill:  &backfill,
+				SystemPrompt:              &prompt,
+				SystemPromptOverride:      &promptOverride,
+				ModelFirstResponseTimeout: &timeout,
+				ErrorRetryPolicy:          policy,
+			}}))
+			require.NoError(t, db.First(&gotA, a).Error)
+			setting := gotA.GetSetting()
+			assert.True(t, setting.ReasoningContentBackfill)
+			assert.Equal(t, "be nice", setting.SystemPrompt)
+			assert.True(t, setting.SystemPromptOverride)
+			assert.Equal(t, timeout, setting.ModelFirstResponseTimeout)
+			require.NotNil(t, setting.ErrorRetryPolicy)
+			assert.True(t, setting.ErrorRetryPolicy.Enabled)
+			assert.Equal(t, "http://keep.local:1", setting.Proxy, "unrelated settings must survive the patch")
+
+			// Merge model_first_response_timeout: keep the old model key.
+			timeoutAdd := map[string][]dto.FirstResponseTimeoutTier{
+				"claude-3": {{ContextTokens: 1000, TimeoutMs: 1000}},
+			}
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Settings: &ChannelBatchSettings{
+				ModelFirstResponseTimeout:     &timeoutAdd,
+				ModelFirstResponseTimeoutMode: "merge",
+			}}))
+			require.NoError(t, db.First(&gotA, a).Error)
+			setting = gotA.GetSetting()
+			assert.Len(t, setting.ModelFirstResponseTimeout, 2)
+			assert.Equal(t, 3000, setting.ModelFirstResponseTimeout["gpt-4o"][0].TimeoutMs)
+			assert.Equal(t, 1000, setting.ModelFirstResponseTimeout["claude-3"][0].TimeoutMs)
+
+			// disable_task_polling_sleep lives in the "settings" column.
+			sleep := true
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{OtherSettings: &ChannelBatchOtherSettings{DisableTaskPollingSleep: &sleep}}))
+			require.NoError(t, db.First(&gotA, a).Error)
+			assert.True(t, gotA.GetOtherSettings().DisableTaskPollingSleep)
 		})
 	}
 }
