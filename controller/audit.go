@@ -59,6 +59,7 @@ var auditContentTemplates = map[string]string{
 	"channel.tag_disable":        "Disabled channels with tag ${tag}",
 	"channel.tag_enable":         "Enabled channels with tag ${tag}",
 	"channel.tag_edit":           "Edited channels with tag ${tag}",
+	"channel.batch_edit":         "Batch edited ${count} channels",
 	"channel.tag_batch_set":      "Batch set tag for ${count} channels",
 	"channel.copy":               "Copied channel (source ID: ${sourceId}) to ${name} (new ID: ${id})",
 	"channel.multi_key_manage":   "Multi-key management ${action} on channel (ID: ${id})",

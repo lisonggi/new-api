@@ -1599,6 +1599,106 @@ func FetchModels(c *gin.Context) {
 	})
 }
 
+// ChannelBatchEditRequest scopes a batch edit to an explicit set of channel ids,
+// unlike EditTagChannels which targets every channel sharing a tag.
+type ChannelBatchEditRequest struct {
+	Ids                   []int   `json:"ids"`
+	ModelMapping          *string `json:"model_mapping"`
+	Models                *string `json:"models"`
+	Groups                *string `json:"groups"`
+	Proxy                 *string `json:"proxy"`
+	HTTPProtocol          *string `json:"http_protocol"`
+	HTTP2ConnectionShards *int    `json:"http2_connection_shards"`
+}
+
+func EditChannelBatch(c *gin.Context) {
+	req := ChannelBatchEditRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Ids) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "参数错误",
+		})
+		return
+	}
+	if req.ModelMapping == nil && req.Models == nil && req.Groups == nil &&
+		req.Proxy == nil && req.HTTPProtocol == nil && req.HTTP2ConnectionShards == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "参数错误",
+		})
+		return
+	}
+	// proxy / HTTP protocol / shards live in the sensitive setting field.
+	if (req.Proxy != nil || req.HTTPProtocol != nil || req.HTTP2ConnectionShards != nil) &&
+		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
+		return
+	}
+	if req.Proxy != nil {
+		trimmed := strings.TrimSpace(*req.Proxy)
+		if trimmed != "" {
+			if err := service.ValidateProxyURL(trimmed); err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "代理地址格式错误：" + err.Error(),
+				})
+				return
+			}
+		}
+		normalized, err := service.NormalizeProxyURL(trimmed)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "代理地址格式错误：" + err.Error(),
+			})
+			return
+		}
+		req.Proxy = common.GetPointer[string](normalized)
+	}
+	if req.HTTP2ConnectionShards != nil {
+		shards := *req.HTTP2ConnectionShards
+		if shards < 1 || shards > dto.MaxHTTP2ConnectionShards {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "HTTP/2 分片数量必须在 1-8 之间",
+			})
+			return
+		}
+	}
+	if req.HTTPProtocol != nil {
+		protocol := strings.ToLower(strings.TrimSpace(*req.HTTPProtocol))
+		settings := dto.ChannelSettings{HTTPProtocol: protocol}
+		if req.HTTP2ConnectionShards != nil {
+			settings.HTTP2ConnectionShards = *req.HTTP2ConnectionShards
+		}
+		if err := settings.ValidateHTTPTransport(); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "HTTP 协议设置错误：" + err.Error(),
+			})
+			return
+		}
+		req.HTTPProtocol = common.GetPointer[string](protocol)
+	}
+	if err := model.EditChannelByIDs(req.Ids, req.ModelMapping, req.Models, req.Groups, req.Proxy, req.HTTPProtocol, req.HTTP2ConnectionShards); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.InitChannelCache()
+	if req.Proxy != nil || req.HTTPProtocol != nil || req.HTTP2ConnectionShards != nil {
+		service.ResetProxyClientCache()
+	}
+	recordManageAudit(c, "channel.batch_edit", map[string]any{
+		"count": len(req.Ids),
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    len(req.Ids),
+	})
+	return
+}
+
 func BatchSetChannelTag(c *gin.Context) {
 	channelBatch := ChannelBatch{}
 	err := c.ShouldBindJSON(&channelBatch)

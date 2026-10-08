@@ -637,3 +637,114 @@ func TestEditChannelByTagPatchesChannelSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestEditChannelByIDsPatchesChannelSettings(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(filepath.Join(t.TempDir(), "id-edit.db"))
+			case "mysql":
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_MYSQL_DSN is not configured")
+				}
+				driver = mysql.Open(dsn)
+			case "postgres":
+				dsn := os.Getenv("TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_POSTGRES_DSN is not configured")
+				}
+				driver = postgres.Open(dsn)
+			}
+			db, err := gorm.Open(driver, &gorm.Config{NamingStrategy: schema.NamingStrategy{TablePrefix: "id_edit_test_"}})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+
+			// EditChannelByIDs uses the package-level DB, so swap it in and
+			// restore the shared test database when this dialect case finishes.
+			previousDB, previousType := DB, common.MainDatabaseType()
+			DB = db
+			common.SetMainDatabaseType(common.DatabaseType(dialect))
+			initCol()
+			t.Cleanup(func() {
+				require.NoError(t, db.Migrator().DropTable(&Channel{}, &Ability{}))
+				DB = previousDB
+				common.SetMainDatabaseType(previousType)
+				initCol()
+				require.NoError(t, sqlDB.Close())
+			})
+			require.NoError(t, db.AutoMigrate(&Channel{}, &Ability{}))
+
+			selectedTag := common.GetPointer("sel")
+			otherTag := common.GetPointer("other")
+			channels := []*Channel{
+				{Type: 58, Key: "key-a", Name: "a", Status: common.ChannelStatusEnabled, Tag: selectedTag, Setting: common.GetPointer(`{"proxy":"","force_format":true}`)},
+				{Type: 58, Key: "key-b", Name: "b", Status: common.ChannelStatusEnabled, Tag: selectedTag},
+				{Type: 58, Key: "key-c", Name: "c", Status: common.ChannelStatusEnabled, Tag: otherTag, Setting: common.GetPointer(`{"proxy":"http://keep.local:1"}`)},
+				{Type: 58, Key: "key-e", Name: "e", Status: common.ChannelStatusEnabled, Tag: selectedTag, Setting: common.GetPointer(`{"proxy":`)},
+			}
+			for _, channel := range channels {
+				require.NoError(t, db.Create(channel).Error)
+			}
+
+			proxy := "http://new-proxy.local:8080"
+			protocol := dto.HTTPProtocolHTTP1
+			require.NoError(t, EditChannelByIDs([]int{channels[0].Id, channels[1].Id, channels[3].Id}, nil, nil, nil, &proxy, &protocol, nil))
+
+			var gotA, gotB, gotC, gotE Channel
+			require.NoError(t, db.First(&gotA, channels[0].Id).Error)
+			require.NoError(t, db.First(&gotB, channels[1].Id).Error)
+			require.NoError(t, db.First(&gotC, channels[2].Id).Error)
+			require.NoError(t, db.First(&gotE, channels[3].Id).Error)
+
+			for _, got := range []*Channel{&gotA, &gotB} {
+				setting := got.GetSetting()
+				assert.Equal(t, proxy, setting.Proxy)
+				assert.Equal(t, dto.HTTPProtocolHTTP1, setting.HTTPProtocol)
+				assert.Equal(t, 1, setting.HTTP2ConnectionShards, "http1 must force a single connection shard")
+			}
+			assert.True(t, gotA.GetSetting().ForceFormat, "unrelated setting fields must survive the patch")
+			assert.Equal(t, "key-a", gotA.Key, "the settings patch must not wipe the channel key")
+			assert.Equal(t, "key-b", gotB.Key)
+			require.NotNil(t, gotB.Setting, "a channel with no setting must receive one")
+
+			assert.Equal(t, "http://keep.local:1", gotC.GetSetting().Proxy, "channels outside the id set must be untouched")
+
+			// A malformed stored setting makes GetSetting rewrite the row; the
+			// credential must survive that path.
+			assert.Equal(t, "key-e", gotE.Key, "a malformed stored setting must not wipe the channel key")
+			assert.Equal(t, proxy, gotE.GetSetting().Proxy)
+
+			// More than one shard only means anything for HTTP/2, so it also
+			// lifts the HTTP/1.1 pin instead of storing a contradiction.
+			shards := 4
+			require.NoError(t, EditChannelByIDs([]int{channels[0].Id}, nil, nil, nil, nil, nil, &shards))
+			var gotA2 Channel
+			require.NoError(t, db.First(&gotA2, channels[0].Id).Error)
+			settingA2 := gotA2.GetSetting()
+			assert.Equal(t, 4, settingA2.HTTP2ConnectionShards)
+			assert.Empty(t, settingA2.HTTPProtocol, "multiple shards must not coexist with an HTTP/1.1 pin")
+			assert.Equal(t, proxy, settingA2.Proxy, "a shard-only patch must leave the proxy alone")
+
+			cleared := ""
+			require.NoError(t, EditChannelByIDs([]int{channels[2].Id}, nil, nil, nil, &cleared, nil, nil))
+			var gotC2 Channel
+			require.NoError(t, db.First(&gotC2, channels[2].Id).Error)
+			assert.Empty(t, gotC2.GetSetting().Proxy, "an empty proxy patch must clear the stored proxy")
+
+			// A model change must rebuild routing abilities for the selected
+			// channels and leave the rest of the columns/rows alone.
+			models := "gpt-4o,claude-3"
+			require.NoError(t, EditChannelByIDs([]int{channels[0].Id, channels[1].Id}, nil, &models, nil, nil, nil, nil))
+			var gotA3, gotC3 Channel
+			require.NoError(t, db.First(&gotA3, channels[0].Id).Error)
+			require.NoError(t, db.First(&gotC3, channels[2].Id).Error)
+			assert.Equal(t, models, gotA3.Models)
+			assert.Empty(t, gotC3.Models, "channels outside the id set must not receive models")
+		})
+	}
+}

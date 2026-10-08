@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQueryClient } from '@tanstack/react-query'
-import { type Table } from '@tanstack/react-table'
-import { Power, PowerOff, Tag, Trash2 } from 'lucide-react'
+import type { Table } from '@tanstack/react-table'
+import { Pencil, Power, PowerOff, Tag, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -47,6 +47,7 @@ import {
   handleBatchSetTag,
 } from '../lib'
 import type { Channel } from '../types'
+import { ChannelBatchEditDialog } from './dialogs/channel-batch-edit-dialog'
 
 interface DataTableBulkActionsProps<TData> {
   table: Table<TData>
@@ -59,6 +60,8 @@ export function DataTableBulkActions<TData>({
   const queryClient = useQueryClient()
   const [showTagDialog, setShowTagDialog] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showBatchEditDialog, setShowBatchEditDialog] = useState(false)
+  const [batchEditIds, setBatchEditIds] = useState<number[]>([])
   const [tagValue, setTagValue] = useState('')
   const currentUser = useAuthStore((s) => s.auth.user)
   const canEditSensitive = hasPermission(
@@ -104,6 +107,13 @@ export function DataTableBulkActions<TData>({
       setTagValue('')
       handleClearSelection()
     })
+  }
+
+  const handleOpenBatchEdit = () => {
+    // Snapshot the selection: the toolbar (and this dialog) unmounts as soon as
+    // the selection is cleared after a successful save.
+    setBatchEditIds(selectedIds)
+    setShowBatchEditDialog(true)
   }
 
   return (
@@ -171,6 +181,27 @@ export function DataTableBulkActions<TData>({
           </TooltipTrigger>
           <TooltipContent>
             <p>{t('Set tag for selected channels')}</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='outline'
+                size='icon'
+                onClick={handleOpenBatchEdit}
+                className='size-8'
+                aria-label={t('Batch edit selected channels')}
+                title={t('Batch edit selected channels')}
+              />
+            }
+          >
+            <Pencil />
+            <span className='sr-only'>{t('Batch edit selected channels')}</span>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{t('Batch edit selected channels')}</p>
           </TooltipContent>
         </Tooltip>
 
@@ -252,6 +283,14 @@ export function DataTableBulkActions<TData>({
           </div>
         </div>
       </Dialog>
+
+      {/* Batch Edit Dialog */}
+      <ChannelBatchEditDialog
+        open={showBatchEditDialog}
+        onOpenChange={setShowBatchEditDialog}
+        ids={batchEditIds}
+        onSaved={handleClearSelection}
+      />
 
       {/* Delete Confirmation Dialog */}
       <Dialog

@@ -18,18 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { SettingsSwitchField } from '@/features/system-settings/components/settings-form-layout'
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { editTagChannels } from '../../api'
+import { editChannelBatch } from '../../api'
 import {
   buildChannelAttributeParams,
   channelsQueryKeys,
@@ -37,34 +35,32 @@ import {
   validateChannelAttributeChanges,
   type ChannelAttributeChanges,
 } from '../../lib'
-import type { TagOperationParams } from '../../types'
 import { ChannelAttributeFields } from '../channel-attribute-fields'
-import { useChannels } from '../channels-provider'
 
-type TagBatchEditDialogProps = {
+type ChannelBatchEditDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Channel ids captured when the dialog was opened. */
+  ids: number[]
+  /** Called after a successful save, before the parent clears the selection. */
+  onSaved: () => void
 }
 
-export function TagBatchEditDialog(props: TagBatchEditDialogProps) {
+/**
+ * Batch edit the attributes of an explicit set of selected channels. Each
+ * attribute is opt-in (default keep unchanged), so an edit only writes what the
+ * administrator turned on.
+ */
+export function ChannelBatchEditDialog(props: ChannelBatchEditDialogProps) {
   const { t } = useTranslation()
-  const { currentTag } = useChannels()
   const queryClient = useQueryClient()
   const [isSaving, setIsSaving] = useState(false)
-  const [tagEnabled, setTagEnabled] = useState(false)
-  const [newTag, setNewTag] = useState('')
   const [changes, setChanges] = useState<ChannelAttributeChanges>(() =>
     emptyChannelAttributeChanges()
   )
 
-  useEffect(() => {
-    if (props.open && currentTag) {
-      setNewTag(currentTag)
-    }
-  }, [props.open, currentTag])
-
   const handleSave = async () => {
-    if (!currentTag) return
+    if (props.ids.length === 0) return
 
     const errorKey = validateChannelAttributeChanges(changes)
     if (errorKey) {
@@ -72,57 +68,47 @@ export function TagBatchEditDialog(props: TagBatchEditDialogProps) {
       return
     }
 
+    const attributeParams = buildChannelAttributeParams(changes)
+    if (Object.keys(attributeParams).length === 0) {
+      toast.warning(t('No changes made'))
+      return
+    }
+
     setIsSaving(true)
     try {
-      const params: Record<string, string | number | undefined> = {
-        tag: currentTag,
-      }
-      if (tagEnabled && newTag !== currentTag) {
-        params.new_tag = newTag
-      }
-      Object.assign(params, buildChannelAttributeParams(changes))
-
-      // Nothing but the tag selector was chosen: there is nothing to write.
-      if (Object.keys(params).length === 1) {
-        toast.warning(t('No changes made'))
-        return
-      }
-
-      const response = await editTagChannels(
-        params as unknown as TagOperationParams
-      )
+      const response = await editChannelBatch({
+        ids: props.ids,
+        ...attributeParams,
+      })
       if (response.success) {
-        toast.success(t('Tag updated successfully'))
+        toast.success(t('Channels updated successfully'))
         queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
         handleClose()
+        props.onSaved()
       } else {
-        handleServerError(response, t('Failed to update tag'))
+        handleServerError(response, t('Failed to update channels'))
       }
     } catch (error: unknown) {
-      handleServerError(error, t('Failed to update tag'))
+      handleServerError(error, t('Failed to update channels'))
     } finally {
       setIsSaving(false)
     }
   }
 
   const handleClose = () => {
-    setTagEnabled(false)
-    setNewTag('')
     setChanges(emptyChannelAttributeChanges())
     props.onOpenChange(false)
   }
-
-  if (!currentTag) return null
 
   return (
     <Dialog
       open={props.open}
       onOpenChange={handleClose}
-      title={t('Batch Edit by Tag')}
+      title={t('Batch Edit Selected Channels')}
       description={
         <>
-          {t('Edit all channels with tag:')}
-          <strong>{currentTag}</strong>
+          {t('Edit the selected channels:')}
+          <strong>{props.ids.length}</strong>
         </>
       }
       contentClassName='max-w-2xl'
@@ -151,27 +137,6 @@ export function TagBatchEditDialog(props: TagBatchEditDialogProps) {
             )}
           </AlertDescription>
         </Alert>
-
-        {/* Tag Name */}
-        <div className='space-y-2'>
-          <SettingsSwitchField
-            controlId='tag-name-scope'
-            checked={tagEnabled}
-            onCheckedChange={setTagEnabled}
-            label={t('Tag Name')}
-            disabled={isSaving}
-          />
-          <Input
-            aria-label={t('Tag Name')}
-            placeholder={t('Enter new tag name (leave empty to disband tag)')}
-            value={newTag}
-            onChange={(e) => setNewTag(e.target.value)}
-            disabled={isSaving || !tagEnabled}
-          />
-          <p className='text-muted-foreground text-xs'>
-            {t('Leave empty to disband the tag')}
-          </p>
-        </div>
 
         <ChannelAttributeFields
           value={changes}
