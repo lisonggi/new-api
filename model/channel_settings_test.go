@@ -878,3 +878,157 @@ func TestEditChannelByIDsBatchModesAndSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestEditChannelByIDsBatchAdversarial(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(filepath.Join(t.TempDir(), "id-adv.db"))
+			case "mysql":
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_MYSQL_DSN is not configured")
+				}
+				driver = mysql.Open(dsn)
+			case "postgres":
+				dsn := os.Getenv("TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_POSTGRES_DSN is not configured")
+				}
+				driver = postgres.Open(dsn)
+			}
+			db, err := gorm.Open(driver, &gorm.Config{NamingStrategy: schema.NamingStrategy{TablePrefix: "id_adv_test_"}})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+
+			previousDB, previousType := DB, common.MainDatabaseType()
+			DB = db
+			common.SetMainDatabaseType(common.DatabaseType(dialect))
+			initCol()
+			t.Cleanup(func() {
+				require.NoError(t, db.Migrator().DropTable(&Channel{}, &Ability{}))
+				DB = previousDB
+				common.SetMainDatabaseType(previousType)
+				initCol()
+				require.NoError(t, sqlDB.Close())
+			})
+			require.NoError(t, db.AutoMigrate(&Channel{}, &Ability{}))
+
+			// a carries a malformed model_mapping, an invalid stored retry
+			// policy and unrelated setting/other-setting fields that must all
+			// survive an unrelated patch. b carries an array mapping and empty
+			// models/group.
+			malformedMapping := `{not json`
+			arrayMapping := `[1,2]`
+			validMapping := `{"x":"y"}`
+			invalidPolicySetting := `{"task_plugin_key":"k1","pass_through_body_enabled":true,"error_retry_policy":{"enabled":true,"unknown":1}}`
+			otherA := `{"aws_key_type":"api_key","claude_beta_query":true}`
+			channels := []*Channel{
+				{Type: 1, Key: "key-a", Name: "a", Status: common.ChannelStatusEnabled, Models: "gpt-4o,claude-3", Group: "default", ModelMapping: &malformedMapping, Setting: common.GetPointer(invalidPolicySetting), OtherSettings: otherA},
+				{Type: 1, Key: "key-b", Name: "b", Status: common.ChannelStatusEnabled, Models: "", Group: "", ModelMapping: &arrayMapping, Setting: common.GetPointer("{}")},
+				{Type: 1, Key: "key-c", Name: "c", Status: common.ChannelStatusEnabled, Models: "other-model", Group: "g", ModelMapping: &validMapping, Setting: common.GetPointer("{}")},
+			}
+			for _, channel := range channels {
+				require.NoError(t, db.Create(channel).Error)
+			}
+			a, b, c := channels[0].Id, channels[1].Id, channels[2].Id
+			// Seed the ability rows so a priority change must refresh them.
+			require.NoError(t, channels[0].UpdateAbilities(nil))
+
+			var gotA, gotB, gotC Channel
+			reload := func() {
+				require.NoError(t, db.First(&gotA, a).Error)
+				require.NoError(t, db.First(&gotB, b).Error)
+				require.NoError(t, db.First(&gotC, c).Error)
+			}
+
+			// Append models: trim blanks and drop duplicates, existing first.
+			addedModels := " gpt-4o , gpt-4.1 ,"
+			require.NoError(t, EditChannelByIDs([]int{a, b}, ChannelBatchFields{Models: &addedModels, ModelsMode: "append"}))
+			reload()
+			assert.Equal(t, "gpt-4o,claude-3,gpt-4.1", gotA.Models)
+			assert.Equal(t, "gpt-4o,gpt-4.1", gotB.Models, "an empty model list must accept the appended models")
+
+			// Append groups: union with the current list.
+			addedGroups := "vip,default"
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Group: &addedGroups, GroupMode: "append"}))
+			reload()
+			assert.Equal(t, "default,vip", gotA.Group)
+
+			// Merge model_mapping over a malformed stored value: the stored
+			// value is dropped, the incoming keys win, the key column survives.
+			mergeMapping := `{"gpt-4.1":"u41"}`
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{ModelMapping: &mergeMapping, ModelMappingMode: "merge"}))
+			reload()
+			merged := map[string]string{}
+			require.NoError(t, common.UnmarshalJsonStr(*gotA.ModelMapping, &merged))
+			assert.Equal(t, map[string]string{"gpt-4.1": "u41"}, merged)
+			assert.Equal(t, "key-a", gotA.Key)
+
+			// Merge over an array mapping also falls back to an empty object.
+			mergeB := `{"z":"w"}`
+			require.NoError(t, EditChannelByIDs([]int{b}, ChannelBatchFields{ModelMapping: &mergeB, ModelMappingMode: "merge"}))
+			reload()
+			mergedB := map[string]string{}
+			require.NoError(t, common.UnmarshalJsonStr(*gotB.ModelMapping, &mergedB))
+			assert.Equal(t, map[string]string{"z": "w"}, mergedB)
+
+			// A settings patch keeps the unrelated setting fields and the raw
+			// bytes of a stored-but-invalid error_retry_policy.
+			thinking := true
+			prompt := "hi"
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Settings: &ChannelBatchSettings{
+				ThinkingToContent: &thinking,
+				SystemPrompt:      &prompt,
+			}}))
+			reload()
+			rawSetting := *gotA.Setting
+			assert.Contains(t, rawSetting, `"task_plugin_key":"k1"`)
+			assert.Contains(t, rawSetting, `"pass_through_body_enabled":true`)
+			assert.Contains(t, rawSetting, `"thinking_to_content":true`)
+			assert.Contains(t, rawSetting, `"system_prompt":"hi"`)
+			assert.Contains(t, rawSetting, `"error_retry_policy":{"enabled":true,"unknown":1}`,
+				"a stored-but-invalid policy must survive an unrelated patch")
+			assert.Equal(t, "key-a", gotA.Key)
+
+			// Replacing the timeout with an empty object clears it.
+			emptyTimeout := map[string][]dto.FirstResponseTimeoutTier{}
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Settings: &ChannelBatchSettings{
+				ModelFirstResponseTimeout: &emptyTimeout,
+			}}))
+			reload()
+			assert.Empty(t, gotA.GetSetting().ModelFirstResponseTimeout)
+
+			// The other-settings patch keeps the unrelated other-settings fields.
+			sleep := true
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{OtherSettings: &ChannelBatchOtherSettings{DisableTaskPollingSleep: &sleep}}))
+			reload()
+			other := gotA.GetOtherSettings()
+			assert.True(t, other.DisableTaskPollingSleep)
+			assert.Equal(t, dto.AwsKeyTypeApiKey, other.AwsKeyType)
+			assert.True(t, other.ClaudeBetaQuery)
+
+			// A priority change must be reflected in the routing abilities.
+			priority := int64(7)
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Priority: &priority}))
+			var ability Ability
+			require.NoError(t, db.Where("channel_id = ? AND model = ?", a, "gpt-4o").First(&ability).Error)
+			require.NotNil(t, ability.Priority, "the ability must carry the new priority")
+			assert.Equal(t, int64(7), *ability.Priority)
+
+			// The unselected channel is untouched.
+			reload()
+			assert.Equal(t, "other-model", gotC.Models)
+			assert.Equal(t, "g", gotC.Group)
+			assert.Equal(t, validMapping, *gotC.ModelMapping)
+			assert.Equal(t, "{}", *gotC.Setting)
+
+			// An empty id set is a no-op.
+			require.NoError(t, EditChannelByIDs(nil, ChannelBatchFields{Models: &addedModels, ModelsMode: "append"}))
+		})
+	}
+}

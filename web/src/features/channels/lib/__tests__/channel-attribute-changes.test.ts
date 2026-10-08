@@ -173,3 +173,46 @@ test('a valid change set passes validation', () => {
   }
   expect(validateChannelAttributeChanges(changes)).toBeNull()
 })
+
+test('an array first response timeout value is rejected', () => {
+  const changes = emptyChannelAttributeChanges()
+  changes.settings.modelFirstResponseTimeout = {
+    enabled: true,
+    mode: 'replace',
+    value: '[1,2,3]',
+  }
+  expect(validateChannelAttributeChanges(changes)).toBe(
+    'Model first response timeout must be a JSON object mapping model names to tiers'
+  )
+})
+
+test('a first response timeout tier with an empty list is rejected', () => {
+  const changes = emptyChannelAttributeChanges()
+  changes.settings.modelFirstResponseTimeout = {
+    enabled: true,
+    mode: 'replace',
+    value: '{"gpt-4o":[]}',
+  }
+  expect(validateChannelAttributeChanges(changes)).toBe(
+    'Model first response timeout must be a JSON object mapping model names to tiers'
+  )
+})
+
+test('a retry policy with an unknown field is rejected', () => {
+  const changes = emptyChannelAttributeChanges()
+  changes.settings.errorRetryPolicy = {
+    enabled: true,
+    value: '{"enabled":true,"unknown":1}',
+  }
+  expect(validateChannelAttributeChanges(changes)).toBe(
+    'Error retry policy must be a valid policy object'
+  )
+})
+
+test('an empty system prompt is sent as an explicit clear', () => {
+  const changes = emptyChannelAttributeChanges()
+  changes.settings.systemPrompt = { enabled: true, value: '' }
+  expect(buildChannelAttributeParams(changes)).toEqual({
+    settings: { system_prompt: '' },
+  })
+})

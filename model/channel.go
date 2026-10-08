@@ -1211,7 +1211,11 @@ func EditChannelByIDs(ids []int, f ChannelBatchFields) error {
 			return err
 		}
 	}
-	if f.shouldReCreateAbilities() {
+	// A change to the served models/group or to priority/weight must be
+	// reflected in the routing abilities. Unlike the tag path there is no
+	// per-tag ability update to fall back on, so priority/weight also forces a
+	// rebuild here.
+	if f.shouldReCreateAbilities() || f.Priority != nil || f.Weight != nil {
 		for _, id := range ids {
 			var channel Channel
 			if err := DB.First(&channel, id).Error; err != nil {
