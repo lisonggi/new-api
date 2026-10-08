@@ -17,25 +17,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect } from 'react'
 import { beforeEach, expect, test, vi } from 'vitest'
 
-import {
-  editTagChannels,
-  getAllModels,
-  getGroups,
-  getTagModels,
-} from '../../api'
+import { editTagChannels, getGroups } from '../../api'
 import { ChannelsProvider, useChannels } from '../channels-provider'
 import { TagBatchEditDialog } from '../dialogs/tag-batch-edit-dialog'
 
 vi.mock('../../api', () => ({
   editTagChannels: vi.fn(),
-  getAllModels: vi.fn(),
   getGroups: vi.fn(),
-  getTagModels: vi.fn(),
 }))
 
 async function openTagDialog() {
@@ -60,47 +53,87 @@ async function openTagDialog() {
 }
 
 beforeEach(() => {
-  vi.mocked(getTagModels).mockResolvedValue({ success: true, data: 'gpt-4o' })
-  vi.mocked(getAllModels).mockResolvedValue({ success: true, data: [] })
   vi.mocked(getGroups).mockResolvedValue({ success: true, data: ['default'] })
   vi.mocked(editTagChannels).mockResolvedValue({ success: true })
 })
 
-test('a proxy address and HTTP/1.1 protocol are sent as a settings patch for the tag', async () => {
+test('saving without turning on any attribute sends no request', async () => {
   const user = userEvent.setup()
   await openTagDialog()
 
-  const protocol = screen.getByRole('combobox', { name: 'HTTP Protocol' })
-  expect(protocol).toHaveTextContent('Keep unchanged')
-  await user.click(protocol)
-  await user.click(screen.getByRole('option', { name: 'HTTP/1.1' }))
-  expect(protocol).toHaveTextContent('HTTP/1.1')
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
 
-  const proxyMode = screen.getByRole('combobox', { name: 'Proxy Address' })
-  expect(
-    screen.queryByRole('textbox', { name: 'Proxy Address' })
-  ).not.toBeInTheDocument()
-  await user.click(proxyMode)
-  await user.click(screen.getByRole('option', { name: 'Set' }))
+  expect(editTagChannels).not.toHaveBeenCalled()
+})
+
+test('turning on the proxy sends only the proxy and never the model list', async () => {
+  const user = userEvent.setup()
+  await openTagDialog()
+
+  await user.click(screen.getByRole('switch', { name: 'Proxy Address' }))
   await user.type(
     screen.getByRole('textbox', { name: 'Proxy Address' }),
     'http://proxy.local:8080'
   )
-
   await user.click(screen.getByRole('button', { name: 'Save Changes' }))
-  expect(editTagChannels).toHaveBeenCalledWith({
-    tag: 'surplus-a',
-    models: 'gpt-4o',
-    http_protocol: 'http1',
-    http2_connection_shards: 1,
-    proxy: 'http://proxy.local:8080',
-  })
+
+  await waitFor(() =>
+    expect(editTagChannels).toHaveBeenCalledWith({
+      tag: 'surplus-a',
+      proxy: 'http://proxy.local:8080',
+    })
+  )
+  const payload = vi.mocked(editTagChannels).mock
+    .calls[0][0] as unknown as Record<string, unknown>
+  expect(payload).not.toHaveProperty('models')
+  expect(payload).not.toHaveProperty('model_mapping')
 })
 
-test('clearing the proxy sends an empty patch value and hides the address input', async () => {
+test('turning on the model list sends the list and enables its input', async () => {
   const user = userEvent.setup()
   await openTagDialog()
 
+  const models = screen.getByRole('textbox', { name: 'Models' })
+  expect(models).toBeDisabled()
+
+  await user.click(screen.getByRole('switch', { name: 'Models' }))
+  expect(models).toBeEnabled()
+  await user.type(models, 'gpt-4o,claude-3')
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+  await waitFor(() =>
+    expect(editTagChannels).toHaveBeenCalledWith({
+      tag: 'surplus-a',
+      models: 'gpt-4o,claude-3',
+    })
+  )
+})
+
+test('enabling the model list without a value blocks the save', async () => {
+  const user = userEvent.setup()
+  await openTagDialog()
+
+  await user.click(screen.getByRole('switch', { name: 'Models' }))
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+  expect(editTagChannels).not.toHaveBeenCalled()
+})
+
+test('enabling the proxy without an address blocks the save', async () => {
+  const user = userEvent.setup()
+  await openTagDialog()
+
+  await user.click(screen.getByRole('switch', { name: 'Proxy Address' }))
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+  expect(editTagChannels).not.toHaveBeenCalled()
+})
+
+test('clearing the proxy sends an empty proxy value', async () => {
+  const user = userEvent.setup()
+  await openTagDialog()
+
+  await user.click(screen.getByRole('switch', { name: 'Proxy Address' }))
   await user.click(screen.getByRole('combobox', { name: 'Proxy Address' }))
   await user.click(screen.getByRole('option', { name: 'Clear' }))
   expect(
@@ -108,37 +141,60 @@ test('clearing the proxy sends an empty patch value and hides the address input'
   ).not.toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Save Changes' }))
-  expect(editTagChannels).toHaveBeenCalledWith({
-    tag: 'surplus-a',
-    models: 'gpt-4o',
-    proxy: '',
-  })
+
+  await waitFor(() =>
+    expect(editTagChannels).toHaveBeenCalledWith({
+      tag: 'surplus-a',
+      proxy: '',
+    })
+  )
 })
 
-test('shard-only patches are sent without touching the protocol', async () => {
+test('enabling HTTP/1.1 sends the protocol without a shard patch', async () => {
   const user = userEvent.setup()
   await openTagDialog()
 
-  const shards = screen.getByRole('combobox', {
-    name: 'HTTP/2 Connection Shards',
-  })
-  expect(shards).toHaveTextContent('Keep unchanged')
-  await user.click(shards)
-  await user.click(screen.getByRole('option', { name: '4' }))
-  expect(shards).toHaveTextContent('4')
-
+  await user.click(screen.getByRole('switch', { name: 'HTTP Protocol' }))
+  await user.click(screen.getByRole('combobox', { name: 'HTTP Protocol' }))
+  await user.click(screen.getByRole('option', { name: 'HTTP/1.1' }))
   await user.click(screen.getByRole('button', { name: 'Save Changes' }))
-  expect(editTagChannels).toHaveBeenCalledWith({
-    tag: 'surplus-a',
-    models: 'gpt-4o',
-    http2_connection_shards: 4,
-  })
+
+  await waitFor(() =>
+    expect(editTagChannels).toHaveBeenCalledWith({
+      tag: 'surplus-a',
+      http_protocol: 'http1',
+    })
+  )
 })
 
-test('choosing HTTP/1.1 forces a single shard and disables the shard selector', async () => {
+test('enabling shards sends only the shard patch', async () => {
   const user = userEvent.setup()
   await openTagDialog()
 
+  await user.click(
+    screen.getByRole('switch', { name: 'HTTP/2 Connection Shards' })
+  )
+  await user.click(
+    screen.getByRole('combobox', { name: 'HTTP/2 Connection Shards' })
+  )
+  await user.click(screen.getByRole('option', { name: '4' }))
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+  await waitFor(() =>
+    expect(editTagChannels).toHaveBeenCalledWith({
+      tag: 'surplus-a',
+      http2_connection_shards: 4,
+    })
+  )
+})
+
+test('HTTP/1.1 forces a single shard when the shard scope is enabled', async () => {
+  const user = userEvent.setup()
+  await openTagDialog()
+
+  await user.click(
+    screen.getByRole('switch', { name: 'HTTP/2 Connection Shards' })
+  )
   const shards = screen.getByRole('combobox', {
     name: 'HTTP/2 Connection Shards',
   })
@@ -146,50 +202,53 @@ test('choosing HTTP/1.1 forces a single shard and disables the shard selector', 
   await user.click(screen.getByRole('option', { name: '4' }))
   expect(shards).toHaveTextContent('4')
 
+  await user.click(screen.getByRole('switch', { name: 'HTTP Protocol' }))
   await user.click(screen.getByRole('combobox', { name: 'HTTP Protocol' }))
   await user.click(screen.getByRole('option', { name: 'HTTP/1.1' }))
   expect(shards).toHaveTextContent('1')
   expect(shards).toBeDisabled()
 
   await user.click(screen.getByRole('button', { name: 'Save Changes' }))
-  expect(editTagChannels).toHaveBeenCalledWith({
-    tag: 'surplus-a',
-    models: 'gpt-4o',
-    http_protocol: 'http1',
-    http2_connection_shards: 1,
-  })
+
+  await waitFor(() =>
+    expect(editTagChannels).toHaveBeenCalledWith({
+      tag: 'surplus-a',
+      http_protocol: 'http1',
+      http2_connection_shards: 1,
+    })
+  )
 })
 
-test('choosing the set-proxy mode without an address blocks the save', async () => {
+test('renaming the tag sends the new tag name', async () => {
   const user = userEvent.setup()
   await openTagDialog()
 
-  await user.click(screen.getByRole('combobox', { name: 'Proxy Address' }))
-  await user.click(screen.getByRole('option', { name: 'Set' }))
+  await user.click(screen.getByRole('switch', { name: 'Tag Name' }))
+  const name = screen.getByRole('textbox', { name: 'Tag Name' })
+  await user.clear(name)
+  await user.type(name, 'surplus-b')
   await user.click(screen.getByRole('button', { name: 'Save Changes' }))
 
-  expect(editTagChannels).not.toHaveBeenCalled()
+  await waitFor(() =>
+    expect(editTagChannels).toHaveBeenCalledWith({
+      tag: 'surplus-a',
+      new_tag: 'surplus-b',
+    })
+  )
 })
 
-test('reverting HTTP/1.1 back to keep-unchanged drops the implied shard patch', async () => {
+test('clearing the tag name disbands the tag', async () => {
   const user = userEvent.setup()
   await openTagDialog()
 
-  const protocol = screen.getByRole('combobox', { name: 'HTTP Protocol' })
-  await user.click(protocol)
-  await user.click(screen.getByRole('option', { name: 'HTTP/1.1' }))
-  expect(protocol).toHaveTextContent('HTTP/1.1')
-
-  // Changing the mind back must not leave the HTTP/1.1 shard patch behind:
-  // saving would otherwise rewrite the shards of every tagged channel without
-  // the administrator asking for it.
-  await user.click(protocol)
-  await user.click(screen.getByRole('option', { name: 'Keep unchanged' }))
-  expect(protocol).toHaveTextContent('Keep unchanged')
-
+  await user.click(screen.getByRole('switch', { name: 'Tag Name' }))
+  await user.clear(screen.getByRole('textbox', { name: 'Tag Name' }))
   await user.click(screen.getByRole('button', { name: 'Save Changes' }))
-  expect(editTagChannels).toHaveBeenCalledWith({
-    tag: 'surplus-a',
-    models: 'gpt-4o',
-  })
+
+  await waitFor(() =>
+    expect(editTagChannels).toHaveBeenCalledWith({
+      tag: 'surplus-a',
+      new_tag: '',
+    })
+  )
 })

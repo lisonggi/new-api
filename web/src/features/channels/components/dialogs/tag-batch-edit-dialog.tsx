@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, AlertCircle } from 'lucide-react'
-import { useState, useEffect, useMemo } from 'react'
+import { AlertCircle, Loader2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -27,7 +27,6 @@ import { MultiSelect } from '@/components/multi-select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -38,19 +37,15 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { SettingsSwitchField } from '@/features/system-settings/components/settings-form-layout'
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
-import {
-  getTagModels,
-  editTagChannels,
-  getAllModels,
-  getGroups,
-} from '../../api'
+import { editTagChannels, getGroups } from '../../api'
 import { FIELD_DESCRIPTIONS, FIELD_PLACEHOLDERS } from '../../constants'
 import {
+  HTTP_PROTOCOL_AUTO,
   HTTP_PROTOCOL_HTTP1,
-  KEEP_UNCHANGED,
   channelsQueryKeys,
   type HttpProtocolValue,
 } from '../../lib'
@@ -67,38 +62,56 @@ type TagBatchEditDialogProps = {
   onOpenChange: (open: boolean) => void
 }
 
-type ProtocolChoice = typeof KEEP_UNCHANGED | HttpProtocolValue
+type ProxyMode = 'set' | 'clear'
 
-type ProxyMode = typeof KEEP_UNCHANGED | 'set' | 'clear'
+// Each attribute can only be sent when its scope switch is turned on. This is
+// the single source of truth for "should this field be written", replacing the
+// old implicit "empty string means keep" convention that silently overwrote
+// every tagged channel's model list.
+type ScopeKey =
+  | 'tag'
+  | 'models'
+  | 'modelMapping'
+  | 'groups'
+  | 'httpProtocol'
+  | 'shards'
+  | 'proxy'
 
-export function TagBatchEditDialog({
-  open,
-  onOpenChange,
-}: TagBatchEditDialogProps) {
+const EMPTY_SCOPE: Record<ScopeKey, boolean> = {
+  tag: false,
+  models: false,
+  modelMapping: false,
+  groups: false,
+  httpProtocol: false,
+  shards: false,
+  proxy: false,
+}
+
+export function TagBatchEditDialog(props: TagBatchEditDialogProps) {
   const { t } = useTranslation()
   const { currentTag } = useChannels()
   const queryClient = useQueryClient()
-  const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
-  // Form fields
   const [newTag, setNewTag] = useState('')
   const [models, setModels] = useState('')
   const [modelMapping, setModelMapping] = useState('')
   const [groups, setGroups] = useState<string[]>([])
   const [httpProtocol, setHttpProtocol] =
-    useState<ProtocolChoice>(KEEP_UNCHANGED)
-  const [proxyMode, setProxyMode] = useState<ProxyMode>(KEEP_UNCHANGED)
+    useState<HttpProtocolValue>(HTTP_PROTOCOL_AUTO)
+  const [shards, setShards] = useState('1')
+  const [proxyMode, setProxyMode] = useState<ProxyMode>('set')
   const [proxyAddress, setProxyAddress] = useState('')
-  const [shards, setShards] = useState<string>(KEEP_UNCHANGED)
 
-  // Fetch available groups
+  const [scope, setScope] = useState<Record<ScopeKey, boolean>>({
+    ...EMPTY_SCOPE,
+  })
+
   const { data: groupsData, isLoading: isLoadingGroups } = useQuery({
     queryKey: ['groups'],
     queryFn: async () => requireServerSuccess(await getGroups()),
   })
 
-  // Transform groups to multi-select options
   const groupOptions = useMemo(() => {
     if (!groupsData?.data) return []
     const allGroups = new Set([...groupsData.data, ...groups])
@@ -109,44 +122,44 @@ export function TagBatchEditDialog({
   }, [groupsData, groups])
 
   useEffect(() => {
-    if (open && currentTag) {
-      loadTagData()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, currentTag])
-
-  const loadTagData = async () => {
-    if (!currentTag) return
-
-    setIsLoading(true)
-    try {
-      // Fetch current tag models
-      const tagModelsResponse = await getTagModels(currentTag)
-      requireServerSuccess(tagModelsResponse)
-      if (tagModelsResponse.success && tagModelsResponse.data) {
-        setModels(tagModelsResponse.data)
-      }
-
-      // Fetch all available models (for future use if needed)
-      const allModelsResponse = requireServerSuccess(await getAllModels())
-      if (allModelsResponse.success && allModelsResponse.data) {
-        // Available models could be used for autocomplete in the future
-      }
-
-      // Initialize new tag with current tag name
+    if (props.open && currentTag) {
       setNewTag(currentTag)
-    } catch (_error: unknown) {
-      handleServerError(_error, t('Failed to load tag data'))
-    } finally {
-      setIsLoading(false)
+    }
+  }, [props.open, currentTag])
+
+  const setScopeValue = (key: ScopeKey, value: boolean) => {
+    setScope((current) => ({ ...current, [key]: value }))
+  }
+
+  const handleProtocolChange = (value: HttpProtocolValue) => {
+    setHttpProtocol(value)
+    if (value === HTTP_PROTOCOL_HTTP1) {
+      // HTTP/1.1 always uses a single connection shard.
+      setShards('1')
+    }
+  }
+
+  const handleShardsChange = (value: string) => {
+    setShards(value)
+    if (Number(value) > 1) {
+      // More than one shard only means anything for HTTP/2, so it lifts an
+      // HTTP/1.1 pin instead of storing a contradictory combination.
+      setHttpProtocol(HTTP_PROTOCOL_AUTO)
     }
   }
 
   const handleSave = async () => {
     if (!currentTag) return
 
-    // Validate model mapping JSON if provided
-    if (modelMapping.trim()) {
+    if (scope.models && !models.trim()) {
+      toast.error(t('Model list is required'))
+      return
+    }
+    if (scope.modelMapping && !modelMapping.trim()) {
+      toast.error(t('Model mapping is required'))
+      return
+    }
+    if (scope.modelMapping) {
       try {
         JSON.parse(modelMapping)
       } catch {
@@ -154,8 +167,11 @@ export function TagBatchEditDialog({
         return
       }
     }
-
-    if (proxyMode === 'set' && !proxyAddress.trim()) {
+    if (scope.groups && groups.length === 0) {
+      toast.error(t('Select at least one group'))
+      return
+    }
+    if (scope.proxy && proxyMode === 'set' && !proxyAddress.trim()) {
       toast.error(t('Proxy address is required'))
       return
     }
@@ -166,37 +182,29 @@ export function TagBatchEditDialog({
         tag: currentTag,
       }
 
-      if (newTag !== currentTag) {
-        params.new_tag = newTag || undefined
+      if (scope.tag && newTag !== currentTag) {
+        params.new_tag = newTag
       }
-
-      if (models.trim()) {
-        params.models = models
+      if (scope.models) {
+        params.models = models.trim()
       }
-
-      if (modelMapping.trim()) {
-        params.model_mapping = modelMapping
+      if (scope.modelMapping) {
+        params.model_mapping = modelMapping.trim()
       }
-
-      if (groups.length > 0) {
+      if (scope.groups) {
         params.groups = groups.join(',')
       }
-
-      if (httpProtocol !== KEEP_UNCHANGED) {
+      if (scope.httpProtocol) {
         params.http_protocol = httpProtocol
       }
-
-      if (shards !== KEEP_UNCHANGED) {
+      if (scope.shards) {
         params.http2_connection_shards = Number(shards)
       }
-
-      if (proxyMode === 'clear') {
-        params.proxy = ''
-      } else if (proxyMode === 'set') {
-        params.proxy = proxyAddress.trim()
+      if (scope.proxy) {
+        params.proxy = proxyMode === 'clear' ? '' : proxyAddress.trim()
       }
 
-      // Check if there are any changes
+      // Nothing but the tag selector was chosen: there is nothing to write.
       if (Object.keys(params).length === 1) {
         toast.warning(t('No changes made'))
         return
@@ -224,18 +232,19 @@ export function TagBatchEditDialog({
     setModels('')
     setModelMapping('')
     setGroups([])
-    setHttpProtocol(KEEP_UNCHANGED)
-    setProxyMode(KEEP_UNCHANGED)
+    setHttpProtocol(HTTP_PROTOCOL_AUTO)
+    setShards('1')
+    setProxyMode('set')
     setProxyAddress('')
-    setShards(KEEP_UNCHANGED)
-    onOpenChange(false)
+    setScope({ ...EMPTY_SCOPE })
+    props.onOpenChange(false)
   }
 
   if (!currentTag) return null
 
   return (
     <Dialog
-      open={open}
+      open={props.open}
       onOpenChange={handleClose}
       title={t('Batch Edit by Tag')}
       description={
@@ -248,189 +257,206 @@ export function TagBatchEditDialog({
       contentHeight='auto'
       bodyClassName='space-y-4'
       footer={
-        !isLoading ? (
-          <>
-            <Button variant='outline' onClick={handleClose} disabled={isSaving}>
-              {t('Cancel')}
-            </Button>
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? (
-                <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-              ) : null}
-              {isSaving ? t('Saving...') : t('Save Changes')}
-            </Button>
-          </>
-        ) : null
+        <>
+          <Button variant='outline' onClick={handleClose} disabled={isSaving}>
+            {t('Cancel')}
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving ? (
+              <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+            ) : null}
+            {isSaving ? t('Saving...') : t('Save Changes')}
+          </Button>
+        </>
       }
     >
-      {isLoading ? (
-        <div className='flex items-center justify-center py-12'>
-          <Loader2 className='text-muted-foreground h-8 w-8 animate-spin' />
-        </div>
-      ) : (
-        <div className='space-y-4 py-4'>
-          <Alert>
-            <AlertCircle className='h-4 w-4' />
-            <AlertDescription>
-              {t(
-                'All edits are overwrite operations. Leave fields empty to keep current values unchanged.'
-              )}
-            </AlertDescription>
-          </Alert>
-
-          {/* Tag Name */}
-          <div className='space-y-2'>
-            <Label htmlFor='new-tag'>{t('Tag Name')}</Label>
-            <Input
-              id='new-tag'
-              placeholder={t('Enter new tag name (leave empty to disband tag)')}
-              value={newTag}
-              onChange={(e) => setNewTag(e.target.value)}
-              disabled={isSaving}
-            />
-            <p className='text-muted-foreground text-xs'>
-              {t('Leave empty to disband the tag')}
-            </p>
-          </div>
-
-          {/* Models */}
-          <div className='space-y-2'>
-            <Label htmlFor='models'>{t('Models')}</Label>
-            <Textarea
-              id='models'
-              placeholder={t(
-                'Comma-separated model names (leave empty to keep current)'
-              )}
-              value={models}
-              onChange={(e) => setModels(e.target.value)}
-              disabled={isSaving}
-              rows={3}
-            />
-            <p className='text-muted-foreground text-xs'>
-              {t(
-                'Current models for the longest channel in this tag. May not include all models from all channels.'
-              )}
-            </p>
-          </div>
-
-          {/* Model Mapping */}
-          <div className='space-y-2'>
-            <Label htmlFor='model-mapping'>{t('Model Mapping')}</Label>
-            <ModelMappingEditor
-              value={modelMapping}
-              onChange={setModelMapping}
-              disabled={isSaving}
-            />
-          </div>
-
-          {/* Groups */}
-          <div className='space-y-2'>
-            <Label htmlFor='groups'>{t('Groups')}</Label>
-            {isLoadingGroups ? (
-              <Skeleton className='h-10 w-full' />
-            ) : (
-              <MultiSelect
-                options={groupOptions}
-                selected={groups}
-                onChange={setGroups}
-                placeholder={t('Select groups (leave empty to keep current)')}
-              />
+      <div className='space-y-4 py-4'>
+        <Alert>
+          <AlertCircle className='h-4 w-4' />
+          <AlertDescription>
+            {t(
+              "Only the attributes you turn on are changed. Everything else keeps each channel's current value."
             )}
-            <p className='text-muted-foreground text-xs'>
-              {t('User groups that can access channels with this tag')}
-            </p>
-          </div>
+          </AlertDescription>
+        </Alert>
 
-          {/* HTTP Protocol */}
-          <div className='space-y-2'>
-            <Label htmlFor='http-protocol'>{t('HTTP Protocol')}</Label>
-            <HttpProtocolSelect
-              id='http-protocol'
-              className='w-full'
-              allowUnchanged
-              value={httpProtocol}
-              onValueChange={(value) => {
-                const next = value as ProtocolChoice
-                setHttpProtocol(next)
-                if (next === HTTP_PROTOCOL_HTTP1) {
-                  // HTTP/1.1 always uses a single connection shard.
-                  setShards('1')
-                } else if (next === KEEP_UNCHANGED) {
-                  // Returning to "keep unchanged" must drop the shard value that
-                  // HTTP/1.1 implied; otherwise saving would rewrite the shards
-                  // of every channel with this tag without being asked to.
-                  setShards(KEEP_UNCHANGED)
-                }
-              }}
-              disabled={isSaving}
-            />
-            <p className='text-muted-foreground text-xs'>
-              {t(FIELD_DESCRIPTIONS.HTTP_PROTOCOL)}
-            </p>
-          </div>
-
-          {/* HTTP/2 Connection Shards */}
-          <div className='space-y-2'>
-            <Label htmlFor='http2-connection-shards'>
-              {t('HTTP/2 Connection Shards')}
-            </Label>
-            <HttpShardsSelect
-              id='http2-connection-shards'
-              className='w-full'
-              allowUnchanged
-              value={shards}
-              onValueChange={(value) => setShards(value)}
-              disabled={isSaving || httpProtocol === HTTP_PROTOCOL_HTTP1}
-            />
-            <p className='text-muted-foreground text-xs'>
-              {httpProtocol === HTTP_PROTOCOL_HTTP1
-                ? t(FIELD_DESCRIPTIONS.HTTP2_CONNECTION_SHARDS_HTTP1)
-                : t(FIELD_DESCRIPTIONS.HTTP2_CONNECTION_SHARDS)}
-            </p>
-          </div>
-
-          {/* Proxy */}
-          <div className='space-y-2'>
-            <Label htmlFor='proxy-mode'>{t('Proxy Address')}</Label>
-            <Select
-              items={[
-                { value: KEEP_UNCHANGED, label: t('Keep unchanged') },
-                { value: 'set', label: t('Set') },
-                { value: 'clear', label: t('Clear') },
-              ]}
-              value={proxyMode}
-              onValueChange={(value) => setProxyMode(value as ProxyMode)}
-              disabled={isSaving}
-            >
-              <SelectTrigger id='proxy-mode' className='w-full'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent alignItemWithTrigger={false}>
-                <SelectGroup>
-                  <SelectItem value={KEEP_UNCHANGED}>
-                    {t('Keep unchanged')}
-                  </SelectItem>
-                  <SelectItem value='set'>{t('Set')}</SelectItem>
-                  <SelectItem value='clear'>{t('Clear')}</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            {proxyMode === 'set' ? (
-              <Input
-                id='proxy-address'
-                aria-label={t('Proxy Address')}
-                placeholder={t(FIELD_PLACEHOLDERS.PROXY)}
-                value={proxyAddress}
-                onChange={(e) => setProxyAddress(e.target.value)}
-                disabled={isSaving}
-              />
-            ) : null}
-            <p className='text-muted-foreground text-xs'>
-              {t(FIELD_DESCRIPTIONS.PROXY)}
-            </p>
-          </div>
+        {/* Tag Name */}
+        <div className='space-y-2'>
+          <SettingsSwitchField
+            controlId='tag-name-scope'
+            checked={scope.tag}
+            onCheckedChange={(value) => setScopeValue('tag', value)}
+            label={t('Tag Name')}
+            disabled={isSaving}
+          />
+          <Input
+            aria-label={t('Tag Name')}
+            placeholder={t('Enter new tag name (leave empty to disband tag)')}
+            value={newTag}
+            onChange={(e) => setNewTag(e.target.value)}
+            disabled={isSaving || !scope.tag}
+          />
+          <p className='text-muted-foreground text-xs'>
+            {t('Leave empty to disband the tag')}
+          </p>
         </div>
-      )}
+
+        {/* Models */}
+        <div className='space-y-2'>
+          <SettingsSwitchField
+            controlId='models-scope'
+            checked={scope.models}
+            onCheckedChange={(value) => setScopeValue('models', value)}
+            label={t('Models')}
+            disabled={isSaving}
+          />
+          <Textarea
+            aria-label={t('Models')}
+            placeholder={t('Comma-separated model names')}
+            value={models}
+            onChange={(e) => setModels(e.target.value)}
+            disabled={isSaving || !scope.models}
+            rows={3}
+          />
+        </div>
+
+        {/* Model Mapping */}
+        <div className='space-y-2'>
+          <SettingsSwitchField
+            controlId='model-mapping-scope'
+            checked={scope.modelMapping}
+            onCheckedChange={(value) => setScopeValue('modelMapping', value)}
+            label={t('Model Mapping')}
+            disabled={isSaving}
+          />
+          <ModelMappingEditor
+            value={modelMapping}
+            onChange={setModelMapping}
+            disabled={isSaving || !scope.modelMapping}
+          />
+        </div>
+
+        {/* Groups */}
+        <div className='space-y-2'>
+          <SettingsSwitchField
+            controlId='groups-scope'
+            checked={scope.groups}
+            onCheckedChange={(value) => setScopeValue('groups', value)}
+            label={t('Groups')}
+            disabled={isSaving}
+          />
+          {isLoadingGroups ? (
+            <Skeleton className='h-10 w-full' />
+          ) : (
+            <MultiSelect
+              options={groupOptions}
+              selected={groups}
+              onChange={setGroups}
+              placeholder={t('Select groups (leave empty to keep current)')}
+              disabled={isSaving || !scope.groups}
+            />
+          )}
+          <p className='text-muted-foreground text-xs'>
+            {t('User groups that can access channels with this tag')}
+          </p>
+        </div>
+
+        {/* HTTP Protocol */}
+        <div className='space-y-2'>
+          <SettingsSwitchField
+            controlId='http-protocol-scope'
+            checked={scope.httpProtocol}
+            onCheckedChange={(value) => setScopeValue('httpProtocol', value)}
+            label={t('HTTP Protocol')}
+            disabled={isSaving}
+          />
+          <HttpProtocolSelect
+            id='http-protocol'
+            aria-label={t('HTTP Protocol')}
+            className='w-full'
+            value={httpProtocol}
+            onValueChange={(value) =>
+              handleProtocolChange(value as HttpProtocolValue)
+            }
+            disabled={isSaving || !scope.httpProtocol}
+          />
+          <p className='text-muted-foreground text-xs'>
+            {t(FIELD_DESCRIPTIONS.HTTP_PROTOCOL)}
+          </p>
+        </div>
+
+        {/* HTTP/2 Connection Shards */}
+        <div className='space-y-2'>
+          <SettingsSwitchField
+            controlId='http2-connection-shards-scope'
+            checked={scope.shards}
+            onCheckedChange={(value) => setScopeValue('shards', value)}
+            label={t('HTTP/2 Connection Shards')}
+            disabled={isSaving}
+          />
+          <HttpShardsSelect
+            id='http2-connection-shards'
+            aria-label={t('HTTP/2 Connection Shards')}
+            className='w-full'
+            value={shards}
+            onValueChange={handleShardsChange}
+            disabled={
+              isSaving || !scope.shards || httpProtocol === HTTP_PROTOCOL_HTTP1
+            }
+          />
+          <p className='text-muted-foreground text-xs'>
+            {httpProtocol === HTTP_PROTOCOL_HTTP1
+              ? t(FIELD_DESCRIPTIONS.HTTP2_CONNECTION_SHARDS_HTTP1)
+              : t(FIELD_DESCRIPTIONS.HTTP2_CONNECTION_SHARDS)}
+          </p>
+        </div>
+
+        {/* Proxy */}
+        <div className='space-y-2'>
+          <SettingsSwitchField
+            controlId='proxy-scope'
+            checked={scope.proxy}
+            onCheckedChange={(value) => setScopeValue('proxy', value)}
+            label={t('Proxy Address')}
+            disabled={isSaving}
+          />
+          <Select
+            items={[
+              { value: 'set', label: t('Set') },
+              { value: 'clear', label: t('Clear') },
+            ]}
+            value={proxyMode}
+            onValueChange={(value) => setProxyMode(value as ProxyMode)}
+            disabled={isSaving || !scope.proxy}
+          >
+            <SelectTrigger
+              id='proxy-mode'
+              aria-label={t('Proxy Address')}
+              className='w-full'
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                <SelectItem value='set'>{t('Set')}</SelectItem>
+                <SelectItem value='clear'>{t('Clear')}</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          {proxyMode === 'set' ? (
+            <Input
+              aria-label={t('Proxy Address')}
+              placeholder={t(FIELD_PLACEHOLDERS.PROXY)}
+              value={proxyAddress}
+              onChange={(e) => setProxyAddress(e.target.value)}
+              disabled={isSaving || !scope.proxy}
+            />
+          ) : null}
+          <p className='text-muted-foreground text-xs'>
+            {t(FIELD_DESCRIPTIONS.PROXY)}
+          </p>
+        </div>
+      </div>
     </Dialog>
   )
 }
