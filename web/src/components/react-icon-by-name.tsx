@@ -22,44 +22,23 @@ import type { IconBaseProps, IconType } from 'react-icons'
 type IconPackModule = Record<string, unknown>
 type IconPackLoader = () => Promise<IconPackModule>
 
+// The dashboard resolves a react-icons component by name (e.g. the built-in
+// "SiAlipay" / "SiStripe" / "SiWechat" / "LuCreditCard" payment icons) using the
+// prefix match below. Bundling every react-icons pack inflated `dist` by ~40 MB,
+// so the supported packs are curated here; add a pack and its prefix entry in
+// ICON_PACK_CANDIDATES when a new icon source is genuinely needed.
 const ICON_PACK_LOADERS = {
-  ai: () => import('react-icons/ai').then((module) => module as IconPackModule),
   bi: () => import('react-icons/bi').then((module) => module as IconPackModule),
-  bs: () => import('react-icons/bs').then((module) => module as IconPackModule),
-  cg: () => import('react-icons/cg').then((module) => module as IconPackModule),
-  ci: () => import('react-icons/ci').then((module) => module as IconPackModule),
-  di: () => import('react-icons/di').then((module) => module as IconPackModule),
-  fa: () => import('react-icons/fa').then((module) => module as IconPackModule),
   fa6: () =>
     import('react-icons/fa6').then((module) => module as IconPackModule),
-  fc: () => import('react-icons/fc').then((module) => module as IconPackModule),
   fi: () => import('react-icons/fi').then((module) => module as IconPackModule),
-  gi: () => import('react-icons/gi').then((module) => module as IconPackModule),
-  go: () => import('react-icons/go').then((module) => module as IconPackModule),
-  gr: () => import('react-icons/gr').then((module) => module as IconPackModule),
-  hi: () => import('react-icons/hi').then((module) => module as IconPackModule),
   hi2: () =>
     import('react-icons/hi2').then((module) => module as IconPackModule),
-  im: () => import('react-icons/im').then((module) => module as IconPackModule),
-  io: () => import('react-icons/io').then((module) => module as IconPackModule),
   io5: () =>
     import('react-icons/io5').then((module) => module as IconPackModule),
-  lia: () =>
-    import('react-icons/lia').then((module) => module as IconPackModule),
   lu: () => import('react-icons/lu').then((module) => module as IconPackModule),
   md: () => import('react-icons/md').then((module) => module as IconPackModule),
-  pi: () => import('react-icons/pi').then((module) => module as IconPackModule),
-  ri: () => import('react-icons/ri').then((module) => module as IconPackModule),
-  rx: () => import('react-icons/rx').then((module) => module as IconPackModule),
   si: () => import('react-icons/si').then((module) => module as IconPackModule),
-  sl: () => import('react-icons/sl').then((module) => module as IconPackModule),
-  tb: () => import('react-icons/tb').then((module) => module as IconPackModule),
-  tfi: () =>
-    import('react-icons/tfi').then((module) => module as IconPackModule),
-  ti: () => import('react-icons/ti').then((module) => module as IconPackModule),
-  vsc: () =>
-    import('react-icons/vsc').then((module) => module as IconPackModule),
-  wi: () => import('react-icons/wi').then((module) => module as IconPackModule),
 } satisfies Record<string, IconPackLoader>
 
 type IconPackId = keyof typeof ICON_PACK_LOADERS
@@ -67,34 +46,14 @@ type IconPackId = keyof typeof ICON_PACK_LOADERS
 const ICON_PACK_CACHE = new Map<IconPackId, Promise<IconPackModule>>()
 
 const ICON_PACK_CANDIDATES: Array<[RegExp, IconPackId[]]> = [
-  [/^Ai[A-Z0-9]/, ['ai']],
   [/^Bi[A-Z0-9]/, ['bi']],
-  [/^Bs[A-Z0-9]/, ['bs']],
-  [/^Cg[A-Z0-9]/, ['cg']],
-  [/^Ci[A-Z0-9]/, ['ci']],
-  [/^Di[A-Z0-9]/, ['di']],
-  [/^Fa[A-Z0-9]/, ['fa6', 'fa']],
-  [/^Fc[A-Z0-9]/, ['fc']],
+  [/^Fa[A-Z0-9]/, ['fa6']],
   [/^Fi[A-Z0-9]/, ['fi']],
-  [/^Gi[A-Z0-9]/, ['gi']],
-  [/^Go[A-Z0-9]/, ['go']],
-  [/^Gr[A-Z0-9]/, ['gr']],
-  [/^Hi[A-Z0-9]/, ['hi2', 'hi']],
-  [/^Im[A-Z0-9]/, ['im']],
-  [/^Io[A-Z0-9]/, ['io5', 'io']],
-  [/^Lia[A-Z0-9]/, ['lia']],
+  [/^Hi[A-Z0-9]/, ['hi2']],
+  [/^Io[A-Z0-9]/, ['io5']],
   [/^Lu[A-Z0-9]/, ['lu']],
   [/^Md[A-Z0-9]/, ['md']],
-  [/^Pi[A-Z0-9]/, ['pi']],
-  [/^Ri[A-Z0-9]/, ['ri']],
-  [/^Rx[A-Z0-9]/, ['rx']],
   [/^Si[A-Z0-9]/, ['si']],
-  [/^Sl[A-Z0-9]/, ['sl']],
-  [/^Tb[A-Z0-9]/, ['tb']],
-  [/^Tfi[A-Z0-9]/, ['tfi']],
-  [/^Ti[A-Z0-9]/, ['ti']],
-  [/^Vsc[A-Z0-9]/, ['vsc']],
-  [/^Wi[A-Z0-9]/, ['wi']],
 ]
 
 function normalizeIconName(name: string | null | undefined): string | null {
