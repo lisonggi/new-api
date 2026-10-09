@@ -1024,6 +1024,13 @@ func (s *ChannelBatchSettingsRequest) toModelPatch() (*model.ChannelBatchSetting
 		hasValues = true
 	}
 	if raw := strings.TrimSpace(string(s.ErrorRetryPolicy)); raw != "" && raw != "null" {
+		// The batch path writes the setting without going through
+		// Channel.ValidateSettings, so it must enforce the same policy byte
+		// budget the single-channel path enforces; otherwise an API client could
+		// store an oversize policy that the channel editor would then reject.
+		if len(raw) > dto.MaxChannelErrorRetryPolicyBytes {
+			return nil, false, fmt.Errorf("错误重试判断设置错误：error_retry_policy exceeds %d bytes", dto.MaxChannelErrorRetryPolicyBytes)
+		}
 		policy, present, verr := dto.ParseChannelErrorRetryPolicyInSetting([]byte(`{"error_retry_policy":` + raw + `}`))
 		if verr != nil {
 			return nil, false, fmt.Errorf("错误重试判断设置错误：%s", verr.Error())

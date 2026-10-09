@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -122,6 +123,46 @@ func TestEditChannelBatchRemoveMode(t *testing.T) {
 	assert.Contains(t, bad.Body.String(), `"success":false`)
 	require.NoError(t, model.DB.First(&reloaded, channel.Id).Error)
 	assert.JSONEq(t, `{"claude-3":"claude-3-mini"}`, *reloaded.ModelMapping)
+}
+
+// oversizedErrorRetryPolicyJSON builds a schema-valid policy that exceeds the
+// per-field byte budget the single-channel path enforces.
+func oversizedErrorRetryPolicyJSON(ruleCount, condCount int) string {
+	value := strings.Repeat("a", 512)
+	var builder strings.Builder
+	builder.WriteString(`{"enabled":true,"rules":[`)
+	for i := range ruleCount {
+		if i > 0 {
+			builder.WriteString(",")
+		}
+		fmt.Fprintf(&builder, `{"id":"r%d","enabled":true,"action":"retry","conditions":[`, i)
+		for j := range condCount {
+			if j > 0 {
+				builder.WriteString(",")
+			}
+			fmt.Fprintf(&builder, `{"field":"message","operator":"equals","value":"%s"}`, value)
+		}
+		builder.WriteString(`]}`)
+	}
+	builder.WriteString(`]}`)
+	return builder.String()
+}
+
+func TestEditChannelBatchRejectsOversizedErrorRetryPolicy(t *testing.T) {
+	setupChannelBatchEditTest(t)
+	channel := seedBatchEditChannel(t, model.DB)
+
+	policy := oversizedErrorRetryPolicyJSON(16, 4)
+	require.Greater(t, len(policy), dto.MaxChannelErrorRetryPolicyBytes)
+	body := fmt.Sprintf(`{"ids":[%d],"settings":{"error_retry_policy":%s}}`, channel.Id, policy)
+
+	recorder := callChannelBatchHandler(t, EditChannelBatch, 1, common.RoleRootUser, body)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+
+	// The oversize policy must not have been written to the channel.
+	var reloaded model.Channel
+	require.NoError(t, model.DB.First(&reloaded, channel.Id).Error)
+	assert.Nil(t, reloaded.GetSetting().ErrorRetryPolicy)
 }
 
 func TestEditChannelBatchSettingsRequiresSensitiveWrite(t *testing.T) {

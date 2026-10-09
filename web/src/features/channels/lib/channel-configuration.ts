@@ -172,6 +172,7 @@ export function getChannelConfigurationState(
       values.reasoning_content_backfill ||
       values.responses_reasoning_content_backfill ||
       values.assistant_content_backfill ||
+      values.ignore_response_model_mismatch ||
       (values.type !== CHANNEL_TYPE_ADVANCED_CUSTOM &&
         values.pass_through_body_enabled) ||
       (supportsResponsesWebSocket(values.type) &&

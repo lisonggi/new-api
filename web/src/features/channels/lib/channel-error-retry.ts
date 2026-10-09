@@ -539,7 +539,11 @@ export function isChannelErrorRetryPolicyConfigured(
 ): boolean {
   if (!raw || raw.trim() === '') return false
   const parsed = parseChannelErrorRetryPolicyJSON(raw)
-  if (parsed.error || !parsed.policy) return true
+  // An invalid stored value must surface as configured so the editor shows it
+  // instead of hiding a broken policy. An explicit null/absent value is not
+  // configured, matching the backend (null means inherit the global decision).
+  if (parsed.error) return true
+  if (!parsed.policy) return false
   return Boolean(
     parsed.policy.enabled ||
     (parsed.policy.rules && parsed.policy.rules.length > 0)
@@ -559,7 +563,10 @@ export function isValidChannelErrorRetryPolicyJSON(
 ): boolean {
   if (!value || value.trim() === '') return true
   const parsed = parseChannelErrorRetryPolicyJSON(value)
-  if (parsed.error || !parsed.policy) return false
+  if (parsed.error) return false
+  // An explicit null/absent value is valid: the backend treats it as "no
+  // policy / inherit the global decision".
+  if (!parsed.policy) return true
   return (
     channelErrorRetryPolicyUtf8Bytes(parsed.policy) <=
     CHANNEL_ERROR_RETRY_LIMITS.policyBytes

@@ -22,6 +22,8 @@ import { channelSchema } from '../../types'
 import {
   buildChannelErrorRetrySetting,
   extractSettingFieldRawValue,
+  isChannelErrorRetryPolicyConfigured,
+  isValidChannelErrorRetryPolicyJSON,
   parseChannelErrorRetryPolicyJSON,
   parseStatusCodesInput,
   serializeChannelErrorRetryPolicy,
@@ -348,5 +350,24 @@ describe('error_retry_policy strict preservation regressions', () => {
       'error_retry_policy'
     )
     expect(extracted.ambiguous).toBe(true)
+  })
+})
+
+describe('error retry policy absent-value handling', () => {
+  test('treats an explicit null as valid and not configured, matching the backend', () => {
+    expect(isValidChannelErrorRetryPolicyJSON('null')).toBe(true)
+    expect(isChannelErrorRetryPolicyConfigured('null')).toBe(false)
+  })
+
+  test('treats an empty or undefined value as valid and not configured', () => {
+    expect(isValidChannelErrorRetryPolicyJSON('')).toBe(true)
+    expect(isChannelErrorRetryPolicyConfigured('')).toBe(false)
+    expect(isValidChannelErrorRetryPolicyJSON(undefined)).toBe(true)
+    expect(isChannelErrorRetryPolicyConfigured(undefined)).toBe(false)
+  })
+
+  test('reports a broken stored policy as invalid but still configured', () => {
+    expect(isValidChannelErrorRetryPolicyJSON('{oops')).toBe(false)
+    expect(isChannelErrorRetryPolicyConfigured('{oops')).toBe(true)
   })
 })

@@ -115,6 +115,12 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
+		// Normalize last so a param override cannot reintroduce a shape the
+		// target upstream rejects, and so the per-channel backfill switches also
+		// reach a Gemini-format request once it has been converted into a chat
+		// body for an OpenAI-compatible channel.
+		jsonData = relaycommon.NormalizeUpstreamRequest(jsonData, info)
+
 		logger.LogDebug(c, "Gemini request body: %s", jsonData)
 
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
