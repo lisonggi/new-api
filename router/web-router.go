@@ -41,12 +41,12 @@ func SetWebRouter(router *gin.Engine, assets WebAssets, pluginDispatcher gin.Han
 			if c.Request.Method == http.MethodGet {
 				cleanPath := strings.TrimSuffix(c.Request.URL.Path, "/")
 				if data, err := assets.BuildFS.ReadFile("web/dist" + cleanPath + ".html"); err == nil {
-					c.Header("Cache-Control", "no-cache")
+					c.Header("Cache-Control", middleware.CacheControlHTML)
 					c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 					return
 				}
 			}
-			c.Header("Cache-Control", "no-cache")
+			c.Header("Cache-Control", middleware.CacheControlHTML)
 			c.Data(http.StatusOK, "text/html; charset=utf-8", assets.IndexPage)
 		},
 	)

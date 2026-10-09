@@ -15,6 +15,10 @@ import (
 func SetApiRouter(router *gin.Engine) {
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
+	// Data endpoints must never be cached by a CDN in front of the app; keep the
+	// default uncacheable. Handlers that need a specific policy (e.g. ETag
+	// revalidation) override this header afterwards.
+	apiRouter.Use(middleware.DisableCache())
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
 	apiRouter.Use(middleware.AccessTokenAudit())
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
