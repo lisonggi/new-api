@@ -16,13 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Plus, Trash2 } from 'lucide-react'
+import { Code, ListTree, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { TruncatedCell } from '@/components/data-table'
 import { Dialog } from '@/components/dialog'
+import { JsonCodeEditor } from '@/components/json-code-editor'
 import { RuleListTable } from '@/components/rule-list-table'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -38,6 +39,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { SettingsSwitchField } from '@/features/system-settings/components/settings-form-layout'
 
@@ -70,42 +72,41 @@ export function ErrorRetryPolicyEditor(props: EditorProps) {
     () => parseChannelErrorRetryPolicyJSON(props.value),
     [props.value]
   )
+  const [mode, setMode] = useState<'form' | 'json'>('form')
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null)
 
-  if (parsed.error) {
-    return (
-      <Alert variant='destructive'>
-        <AlertTitle>{t('Stored error retry policy is invalid')}</AlertTitle>
-        <AlertDescription className='space-y-2'>
-          <p>
-            {t(
-              'The saved policy cannot be parsed and will block saving until fixed or cleared. It is never silently replaced.'
-            )}
-          </p>
-          <p className='font-mono text-xs'>{parsed.error}</p>
-          <Textarea
-            aria-label={t('Raw error retry policy JSON')}
-            rows={6}
-            disabled={props.disabled}
-            value={props.value}
-            onChange={(event) => props.onChange(event.target.value)}
-          />
-          {props.disabled ? null : (
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              onClick={() => props.onChange('')}
-            >
-              {t('Clear invalid policy')}
-            </Button>
+  const invalidAlert = parsed.error ? (
+    <Alert variant='destructive'>
+      <AlertTitle>{t('Stored error retry policy is invalid')}</AlertTitle>
+      <AlertDescription className='space-y-2'>
+        <p>
+          {t(
+            'The saved policy cannot be parsed and will block saving until fixed or cleared. It is never silently replaced.'
           )}
-        </AlertDescription>
-      </Alert>
-    )
-  }
+        </p>
+        <p className='font-mono text-xs'>{parsed.error}</p>
+        <Textarea
+          aria-label={t('Raw error retry policy JSON')}
+          rows={6}
+          disabled={props.disabled}
+          value={props.value}
+          onChange={(event) => props.onChange(event.target.value)}
+        />
+        {props.disabled ? null : (
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            onClick={() => props.onChange('')}
+          >
+            {t('Clear invalid policy')}
+          </Button>
+        )}
+      </AlertDescription>
+    </Alert>
+  ) : null
 
   const policy: ChannelErrorRetryPolicy = parsed.policy ?? {
     enabled: false,
@@ -148,7 +149,11 @@ export function ErrorRetryPolicyEditor(props: EditorProps) {
     setDeleteIndex(null)
   }
 
-  return (
+  const handleModeChange = (nextMode: string) => {
+    if (nextMode === 'form' || nextMode === 'json') setMode(nextMode)
+  }
+
+  const formBody = (
     <div className='flex flex-col gap-4'>
       <div className='text-muted-foreground text-xs'>
         {t(
@@ -281,6 +286,34 @@ export function ErrorRetryPolicyEditor(props: EditorProps) {
         handleConfirm={handleDelete}
       />
     </div>
+  )
+
+  return (
+    <Tabs value={mode} onValueChange={handleModeChange} className='space-y-2'>
+      <TabsList>
+        <TabsTrigger value='form'>
+          <ListTree className='h-4 w-4' aria-hidden='true' />
+          {t('Form')}
+        </TabsTrigger>
+        <TabsTrigger value='json'>
+          <Code className='h-4 w-4' aria-hidden='true' />
+          {t('JSON')}
+        </TabsTrigger>
+      </TabsList>
+
+      <TabsContent value='form'>{invalidAlert ?? formBody}</TabsContent>
+
+      <TabsContent value='json'>
+        <JsonCodeEditor
+          value={props.value}
+          onChange={props.onChange}
+          disabled={props.disabled}
+          ariaLabel={t('Error retry policy')}
+          placeholder='{"enabled":false,"rules":[]}'
+          heightClassName='h-72 min-h-72 max-h-72'
+        />
+      </TabsContent>
+    </Tabs>
   )
 }
 

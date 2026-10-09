@@ -24,10 +24,10 @@ import {
 } from './channel-form'
 
 export type ChannelAttributeProxyMode = 'set' | 'clear'
-/** Replace overwrites the value; append unions with the current one. */
-export type ChannelAttributeReplaceMode = 'replace' | 'append'
-/** Replace overwrites the value; merge overlays it on the current one. */
-export type ChannelAttributeMergeMode = 'replace' | 'merge'
+/** Replace overwrites; append unions with the current value; remove subtracts from it. */
+export type ChannelAttributeReplaceMode = 'replace' | 'append' | 'remove'
+/** Replace overwrites; merge overlays on the current value; remove deletes the listed keys. */
+export type ChannelAttributeMergeMode = 'replace' | 'merge' | 'remove'
 
 export type ChannelAttributeTimeoutValue = Record<
   string,
@@ -192,20 +192,20 @@ export function buildChannelAttributeParams(
     params.models = changes.models.value.trim()
     // "replace" is the default and stays implicit, so a plain edit request is
     // unchanged from before the mode existed.
-    if (changes.models.mode === 'append') {
-      params.models_mode = 'append'
+    if (changes.models.mode !== 'replace') {
+      params.models_mode = changes.models.mode
     }
   }
   if (changes.modelMapping.enabled) {
     params.model_mapping = changes.modelMapping.value.trim()
-    if (changes.modelMapping.mode === 'merge') {
-      params.model_mapping_mode = 'merge'
+    if (changes.modelMapping.mode !== 'replace') {
+      params.model_mapping_mode = changes.modelMapping.mode
     }
   }
   if (changes.groups.enabled) {
     params.groups = changes.groups.value.join(',')
-    if (changes.groups.mode === 'append') {
-      params.groups_mode = 'append'
+    if (changes.groups.mode !== 'replace') {
+      params.groups_mode = changes.groups.mode
     }
   }
   if (changes.httpProtocol.enabled) {

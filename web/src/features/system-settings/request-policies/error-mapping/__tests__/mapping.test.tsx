@@ -195,6 +195,51 @@ describe('error message mapping settings', () => {
     })
   })
 
+  it('edits the whole config as JSON and saves it', async () => {
+    renderSection()
+    await userEvent.click(await screen.findByRole('tab', { name: 'JSON' }))
+    const editor = screen.getByRole('textbox', { name: 'Mapping rules' })
+
+    const next: ErrorMappingConfig = {
+      enabled: false,
+      rules: [
+        {
+          id: 'json-rule',
+          name: 'From JSON',
+          enabled: true,
+          keywords: ['alpha', 'beta'],
+          case_sensitive: true,
+          replacement: 'From JSON replacement.',
+        },
+      ],
+    }
+    fireEvent.input(editor, {
+      target: { value: JSON.stringify(next, null, 2) },
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    const body = vi.mocked(api.put).mock.calls[0][1] as ErrorMappingConfig
+    expect(body).toEqual(next)
+  })
+
+  it('keeps the last valid draft when the JSON is invalid', async () => {
+    renderSection()
+    await userEvent.click(await screen.findByRole('tab', { name: 'JSON' }))
+    const editor = screen.getByRole('textbox', { name: 'Mapping rules' })
+
+    fireEvent.input(editor, { target: { value: '{ not json' } })
+    expect(await screen.findByText('Config must be valid JSON')).toBeVisible()
+
+    // The invalid text never reached the draft, so saving still submits the
+    // original rule set.
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    const body = vi.mocked(api.put).mock.calls[0][1] as ErrorMappingConfig
+    expect(body.rules).toHaveLength(1)
+    expect(body.rules[0].keywords).toEqual(['reasoning_content'])
+  })
+
   it('rejects a keyword longer than the rune limit', async () => {
     renderSection()
     await userEvent.click(

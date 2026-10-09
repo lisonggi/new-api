@@ -17,17 +17,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw } from 'lucide-react'
+import { Code, ListTree, Plus, RefreshCw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { ErrorState } from '@/components/error-state'
+import { JsonCodeEditor } from '@/components/json-code-editor'
 import { LoadingState } from '@/components/loading-state'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { handleServerError } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
@@ -118,6 +121,9 @@ function ErrorMessageMappingEditor(props: { config: ErrorMappingConfig }) {
   const [previewMessage, setPreviewMessage] = useState('')
   const [preview, setPreview] = useState<PreviewState | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [mode, setMode] = useState<'form' | 'json'>('form')
+  const [jsonText, setJsonText] = useState('')
+  const [jsonError, setJsonError] = useState<string | null>(null)
 
   const baselineRef = useRef<ErrorMappingConfig>(props.config)
   const previewSeqRef = useRef(0)
@@ -237,11 +243,46 @@ function ErrorMessageMappingEditor(props: { config: ErrorMappingConfig }) {
     updateDraft((current) => ({ ...current, enabled }))
   }
 
+  const switchMode = (next: string) => {
+    if (next !== 'form' && next !== 'json') return
+    if (next === 'json') {
+      setJsonText(JSON.stringify(draft, null, 2))
+      setJsonError(null)
+    }
+    setMode(next)
+  }
+
+  // JSON mode edits the whole config. The draft only adopts a syntactically
+  // valid object with a rules array, so an in-progress typo never overwrites the
+  // last good draft; the backend still validates every rule on save.
+  const handleJsonChange = (text: string) => {
+    setJsonText(text)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      setJsonError(t('Config must be valid JSON'))
+      return
+    }
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed) ||
+      !Array.isArray((parsed as { rules?: unknown }).rules)
+    ) {
+      setJsonError(t('Config must be a JSON object with a rules array'))
+      return
+    }
+    setJsonError(null)
+    updateDraft(() => parsed as ErrorMappingConfig)
+  }
+
   const handleReset = () => {
     draftSeqRef.current += 1
     previewSeqRef.current += 1
     setPreview(null)
     setPreviewLoading(false)
+    setJsonError(null)
     setDraft(baselineRef.current)
     setDirty(false)
   }
@@ -341,37 +382,72 @@ function ErrorMessageMappingEditor(props: { config: ErrorMappingConfig }) {
           aria-label={t('Mapping rules')}
           className='bg-card min-w-0 overflow-hidden rounded-xl border'
         >
-          <div className='flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5'>
-            <div className='flex flex-col gap-1'>
-              <div className='flex items-center gap-2'>
-                <h3 className='text-base font-semibold'>
-                  {t('Mapping rules')}
-                </h3>
-                <Badge variant='secondary' className='tabular-nums'>
-                  {draft.rules.length}
-                </Badge>
+          <Tabs value={mode} onValueChange={switchMode} className='gap-0'>
+            <div className='flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5'>
+              <div className='flex flex-col gap-1'>
+                <div className='flex items-center gap-2'>
+                  <h3 className='text-base font-semibold'>
+                    {t('Mapping rules')}
+                  </h3>
+                  <Badge variant='secondary' className='tabular-nums'>
+                    {draft.rules.length}
+                  </Badge>
+                </div>
+                <p className='text-muted-foreground text-sm'>
+                  {t('The first enabled rule that matches wins.')}
+                </p>
               </div>
-              <p className='text-muted-foreground text-sm'>
-                {t('The first enabled rule that matches wins.')}
-              </p>
+              <div className='flex items-center gap-2'>
+                <TabsList>
+                  <TabsTrigger value='form'>
+                    <ListTree className='h-4 w-4' aria-hidden='true' />
+                    {t('Form')}
+                  </TabsTrigger>
+                  <TabsTrigger value='json'>
+                    <Code className='h-4 w-4' aria-hidden='true' />
+                    {t('JSON')}
+                  </TabsTrigger>
+                </TabsList>
+                {mode === 'form' ? (
+                  <Button
+                    variant='outline'
+                    onClick={openAdd}
+                    disabled={
+                      draft.rules.length >= ERROR_MAPPING_LIMITS.maxRules
+                    }
+                  >
+                    <Plus aria-hidden='true' data-icon='inline-start' />
+                    {t('Add mapping rule')}
+                  </Button>
+                ) : null}
+              </div>
             </div>
-            <Button
-              variant='outline'
-              onClick={openAdd}
-              disabled={draft.rules.length >= ERROR_MAPPING_LIMITS.maxRules}
-            >
-              <Plus aria-hidden='true' data-icon='inline-start' />
-              {t('Add mapping rule')}
-            </Button>
-          </div>
-          <ErrorMappingRulesTable
-            rules={draft.rules}
-            onAdd={openAdd}
-            onEdit={openEdit}
-            onDelete={setDeletingIndex}
-            onToggle={handleToggle}
-            onMove={handleMove}
-          />
+            <TabsContent value='form'>
+              <ErrorMappingRulesTable
+                rules={draft.rules}
+                onAdd={openAdd}
+                onEdit={openEdit}
+                onDelete={setDeletingIndex}
+                onToggle={handleToggle}
+                onMove={handleMove}
+              />
+            </TabsContent>
+            <TabsContent value='json' className='space-y-2 px-4 pb-4 sm:px-5'>
+              {jsonError ? (
+                <Alert variant='destructive'>
+                  <AlertDescription>{jsonError}</AlertDescription>
+                </Alert>
+              ) : null}
+              <JsonCodeEditor
+                value={jsonText}
+                onChange={handleJsonChange}
+                ariaLabel={t('Mapping rules')}
+                placeholder='{"enabled":false,"rules":[]}'
+                className={jsonError ? 'border-destructive' : undefined}
+                aria-invalid={Boolean(jsonError)}
+              />
+            </TabsContent>
+          </Tabs>
         </section>
 
         <SettingsCard

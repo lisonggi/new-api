@@ -90,6 +90,30 @@ func TestEditChannelBatchRejectsInvalidPayloads(t *testing.T) {
 	}
 }
 
+func TestEditChannelBatchRemoveMode(t *testing.T) {
+	setupChannelBatchEditTest(t)
+	channel := seedBatchEditChannel(t, model.DB)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Updates(map[string]any{
+		"models":        "gpt-4o,claude-3",
+		"group":         "default,vip",
+		"model_mapping": `{"gpt-4o":"gpt-4o-mini","claude-3":"claude-3-mini"}`,
+	}).Error)
+
+	body := fmt.Sprintf(
+		`{"ids":[%d],"models":"claude-3","models_mode":"remove","groups":"vip","groups_mode":"remove","model_mapping":"{\"gpt-4o\":\"ignored\"}","model_mapping_mode":"remove"}`,
+		channel.Id,
+	)
+	recorder := callChannelBatchHandler(t, EditChannelBatch, 1, common.RoleRootUser, body)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+
+	var reloaded model.Channel
+	require.NoError(t, model.DB.First(&reloaded, channel.Id).Error)
+	assert.Equal(t, "gpt-4o", reloaded.Models)
+	assert.Equal(t, "default", reloaded.Group)
+	require.NotNil(t, reloaded.ModelMapping)
+	assert.JSONEq(t, `{"claude-3":"claude-3-mini"}`, *reloaded.ModelMapping)
+}
+
 func TestEditChannelBatchSettingsRequiresSensitiveWrite(t *testing.T) {
 	setupChannelBatchEditTest(t)
 	channel := seedBatchEditChannel(t, model.DB)

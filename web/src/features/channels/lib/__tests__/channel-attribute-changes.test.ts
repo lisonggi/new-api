@@ -77,6 +77,21 @@ test('model mapping and groups carry their replace/merge mode', () => {
   })
 })
 
+test('remove mode is forwarded for models, groups and model mapping', () => {
+  const changes = emptyChannelAttributeChanges()
+  changes.models = { enabled: true, mode: 'remove', value: 'gpt-4o' }
+  changes.groups = { enabled: true, mode: 'remove', value: ['vip'] }
+  changes.modelMapping = { enabled: true, mode: 'remove', value: '{"a":"b"}' }
+  expect(buildChannelAttributeParams(changes)).toEqual({
+    models: 'gpt-4o',
+    models_mode: 'remove',
+    groups: 'vip',
+    groups_mode: 'remove',
+    model_mapping: '{"a":"b"}',
+    model_mapping_mode: 'remove',
+  })
+})
+
 test('channel settings are only built when enabled', () => {
   const changes = emptyChannelAttributeChanges()
   changes.settings.reasoningContentBackfill = { enabled: true, value: true }

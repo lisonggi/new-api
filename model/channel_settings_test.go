@@ -825,6 +825,28 @@ func TestEditChannelByIDsBatchModesAndSettings(t *testing.T) {
 			require.NoError(t, db.First(&gotA, a).Error)
 			assert.Equal(t, "default,vip", gotA.Group)
 
+			// Remove models: subtract from the current list and keep the rest.
+			removeModels := "gpt-4.1"
+			require.NoError(t, EditChannelByIDs([]int{a, b}, ChannelBatchFields{Models: &removeModels, ModelsMode: "remove"}))
+			require.NoError(t, db.First(&gotA, a).Error)
+			require.NoError(t, db.First(&gotB, b).Error)
+			assert.Equal(t, "gpt-4o", gotA.Models)
+			assert.Equal(t, "claude-3,gpt-4o", gotB.Models)
+
+			// Remove a group: subtract it and keep the rest.
+			removeGroup := "vip"
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Group: &removeGroup, GroupMode: "remove"}))
+			require.NoError(t, db.First(&gotA, a).Error)
+			assert.Equal(t, "default", gotA.Group)
+
+			// Remove a model_mapping key: delete it and keep the rest.
+			removeMapping := `{"gpt-4.1":"ignored"}`
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{ModelMapping: &removeMapping, ModelMappingMode: "remove"}))
+			require.NoError(t, db.First(&gotA, a).Error)
+			removedMapping := map[string]string{}
+			require.NoError(t, common.UnmarshalJsonStr(*gotA.ModelMapping, &removedMapping))
+			assert.Equal(t, map[string]string{"gpt-4o": "gpt-4o-mini"}, removedMapping)
+
 			// Settings patch: booleans, string, JSON config and retry policy in
 			// the "setting" column.
 			backfill := true

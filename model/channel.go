@@ -917,11 +917,11 @@ func EditChannelByTag(tag string, newTag *string, f ChannelBatchFields) error {
 // "only write what was asked for" true for every caller.
 //
 // Models, ModelMapping and Group carry a mode because an administrator may want
-// to add to the current value instead of replacing it:
+// to add to or subtract from the current value instead of replacing it:
 //   - ModelsMode / GroupMode: "" or "replace" overwrites; "append" unions with
-//     the current comma-separated list.
+//     the current comma-separated list; "remove" subtracts from it.
 //   - ModelMappingMode: "" or "replace" overwrites; "merge" overlays the new
-//     entries on the current JSON object.
+//     entries on the current JSON object; "remove" deletes the listed keys.
 type ChannelBatchFields struct {
 	Models                *string
 	ModelsMode            string
@@ -979,17 +979,24 @@ func (s *ChannelBatchSettings) isEmpty() bool {
 		s.ErrorRetryPolicy == nil
 }
 
+// perChannelMode reports whether a models/group/model-mapping mode needs a
+// per-channel read-modify-write instead of a column-level overwrite.
+func perChannelMode(mode string) bool {
+	return mode == "append" || mode == "merge" || mode == "remove"
+}
+
 // buildBulkUpdateData maps the replace-mode column fields onto a Channel used as
-// an Updates payload. Append/merge fields are applied per channel instead.
+// an Updates payload. Append/merge/remove fields are applied per channel
+// instead.
 func (f ChannelBatchFields) buildBulkUpdateData() Channel {
 	updateData := Channel{}
-	if f.ModelMapping != nil && f.ModelMappingMode != "merge" {
+	if f.ModelMapping != nil && !perChannelMode(f.ModelMappingMode) {
 		updateData.ModelMapping = f.ModelMapping
 	}
-	if f.Models != nil && *f.Models != "" && f.ModelsMode != "append" {
+	if f.Models != nil && *f.Models != "" && !perChannelMode(f.ModelsMode) {
 		updateData.Models = *f.Models
 	}
-	if f.Group != nil && *f.Group != "" && f.GroupMode != "append" {
+	if f.Group != nil && *f.Group != "" && !perChannelMode(f.GroupMode) {
 		updateData.Group = *f.Group
 	}
 	if f.Priority != nil {
@@ -1008,12 +1015,12 @@ func (f ChannelBatchFields) buildBulkUpdateData() Channel {
 }
 
 // hasPerChannelColumns reports whether models/group/model_mapping need a
-// per-channel read-modify-write because the caller asked to append/merge instead
-// of replace.
+// per-channel read-modify-write because the caller asked to append, merge or
+// remove instead of replace.
 func (f ChannelBatchFields) hasPerChannelColumns() bool {
-	return (f.Models != nil && f.ModelsMode == "append") ||
-		(f.Group != nil && f.GroupMode == "append") ||
-		(f.ModelMapping != nil && f.ModelMappingMode == "merge")
+	return (f.Models != nil && perChannelMode(f.ModelsMode)) ||
+		(f.Group != nil && perChannelMode(f.GroupMode)) ||
+		(f.ModelMapping != nil && perChannelMode(f.ModelMappingMode))
 }
 
 // shouldReCreateAbilities reports whether the routing abilities must be rebuilt,
@@ -1031,8 +1038,9 @@ func (f ChannelBatchFields) touchesSettings() bool {
 		(f.Settings != nil && !f.Settings.isEmpty()) || f.OtherSettings != nil
 }
 
-// patchChannelBatchColumns applies the append/merge column updates one channel
-// at a time, because each channel's new value depends on its current value.
+// patchChannelBatchColumns applies the append/merge/remove column updates one
+// channel at a time, because each channel's new value depends on its current
+// value.
 func patchChannelBatchColumns(ids []int, f ChannelBatchFields) error {
 	for _, channelId := range ids {
 		var channel Channel
@@ -1040,18 +1048,37 @@ func patchChannelBatchColumns(ids []int, f ChannelBatchFields) error {
 			return err
 		}
 		updates := map[string]any{}
-		if f.Models != nil && f.ModelsMode == "append" {
-			updates["models"] = unionCommaList(channel.Models, *f.Models)
-		}
-		if f.Group != nil && f.GroupMode == "append" {
-			updates["group"] = unionCommaList(channel.Group, *f.Group)
-		}
-		if f.ModelMapping != nil && f.ModelMappingMode == "merge" {
-			merged, err := mergeModelMapping(channel.ModelMapping, *f.ModelMapping)
-			if err != nil {
-				return err
+		if f.Models != nil {
+			switch f.ModelsMode {
+			case "append":
+				updates["models"] = unionCommaList(channel.Models, *f.Models)
+			case "remove":
+				updates["models"] = subtractCommaList(channel.Models, *f.Models)
 			}
-			updates["model_mapping"] = merged
+		}
+		if f.Group != nil {
+			switch f.GroupMode {
+			case "append":
+				updates["group"] = unionCommaList(channel.Group, *f.Group)
+			case "remove":
+				updates["group"] = subtractCommaList(channel.Group, *f.Group)
+			}
+		}
+		if f.ModelMapping != nil {
+			switch f.ModelMappingMode {
+			case "merge":
+				merged, err := mergeModelMapping(channel.ModelMapping, *f.ModelMapping)
+				if err != nil {
+					return err
+				}
+				updates["model_mapping"] = merged
+			case "remove":
+				removed, err := removeModelMappingKeys(channel.ModelMapping, *f.ModelMapping)
+				if err != nil {
+					return err
+				}
+				updates["model_mapping"] = removed
+			}
 		}
 		if len(updates) == 0 {
 			continue
@@ -1097,6 +1124,59 @@ func mergeModelMapping(existing *string, added string) (string, error) {
 	}
 	maps.Copy(merged, incoming)
 	data, err := common.Marshal(merged)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// subtractCommaList removes the comma-separated items of removed from existing,
+// trimming blanks and dropping duplicates while keeping the remaining order.
+func subtractCommaList(existing string, removed string) string {
+	drop := make(map[string]struct{})
+	for part := range strings.SplitSeq(removed, ",") {
+		item := strings.TrimSpace(part)
+		if item != "" {
+			drop[item] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{})
+	items := make([]string, 0)
+	for part := range strings.SplitSeq(existing, ",") {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		if _, ok := drop[item]; ok {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		items = append(items, item)
+	}
+	return strings.Join(items, ",")
+}
+
+// removeModelMappingKeys deletes the keys of removed from the stored mapping.
+// Only the keys matter; the removed values are ignored. A missing or unparsable
+// stored value is treated as an empty object.
+func removeModelMappingKeys(existing *string, removed string) (string, error) {
+	current := map[string]any{}
+	if existing != nil && strings.TrimSpace(*existing) != "" {
+		if err := common.UnmarshalJsonStr(*existing, &current); err != nil {
+			current = map[string]any{}
+		}
+	}
+	var keys map[string]any
+	if err := common.UnmarshalJsonStr(removed, &keys); err != nil {
+		return "", err
+	}
+	for key := range keys {
+		delete(current, key)
+	}
+	data, err := common.Marshal(current)
 	if err != nil {
 		return "", err
 	}

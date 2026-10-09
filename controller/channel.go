@@ -1041,13 +1041,13 @@ func (s *ChannelBatchSettingsRequest) toModelPatch() (*model.ChannelBatchSetting
 // setting, so the caller can enforce ChannelSensitiveWrite; hasValues reports
 // whether anything at all was requested.
 func (a *ChannelBatchAttributes) toModelFields() (fields model.ChannelBatchFields, sensitive bool, hasValues bool, err error) {
-	if err := validateBatchMode("models_mode", a.ModelsMode, "replace", "append"); err != nil {
+	if err := validateBatchMode("models_mode", a.ModelsMode, "replace", "append", "remove"); err != nil {
 		return fields, false, false, err
 	}
-	if err := validateBatchMode("model_mapping_mode", a.ModelMappingMode, "replace", "merge"); err != nil {
+	if err := validateBatchMode("model_mapping_mode", a.ModelMappingMode, "replace", "merge", "remove"); err != nil {
 		return fields, false, false, err
 	}
-	if err := validateBatchMode("groups_mode", a.GroupsMode, "replace", "append"); err != nil {
+	if err := validateBatchMode("groups_mode", a.GroupsMode, "replace", "append", "remove"); err != nil {
 		return fields, false, false, err
 	}
 	fields = model.ChannelBatchFields{

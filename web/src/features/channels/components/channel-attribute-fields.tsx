@@ -42,7 +42,9 @@ import {
   HTTP_PROTOCOL_AUTO,
   HTTP_PROTOCOL_HTTP1,
   type ChannelAttributeChanges,
+  type ChannelAttributeMergeMode,
   type ChannelAttributeProxyMode,
+  type ChannelAttributeReplaceMode,
   type ChannelBatchSettingsChanges,
   type HttpProtocolValue,
 } from '../lib'
@@ -224,13 +226,19 @@ export function ChannelAttributeFields(props: ChannelAttributeFieldsProps) {
 
   const disabled = props.disabled === true
   const settings = props.value.settings
-  const replaceAppendOptions = [
+  const replaceAppendRemoveOptions = [
     { value: 'replace', label: t('Replace') },
     { value: 'append', label: t('Append') },
+    { value: 'remove', label: t('Remove') },
   ]
   const replaceMergeOptions = [
     { value: 'replace', label: t('Replace') },
     { value: 'merge', label: t('Merge') },
+  ]
+  const replaceMergeRemoveOptions = [
+    { value: 'replace', label: t('Replace') },
+    { value: 'merge', label: t('Merge') },
+    { value: 'remove', label: t('Remove') },
   ]
 
   return (
@@ -250,10 +258,10 @@ export function ChannelAttributeFields(props: ChannelAttributeFieldsProps) {
             label={t('Models mode')}
             value={props.value.models.mode}
             onChange={(value) =>
-              setField('models', { mode: value as 'replace' | 'append' })
+              setField('models', { mode: value as ChannelAttributeReplaceMode })
             }
             disabled={disabled || !props.value.models.enabled}
-            options={replaceAppendOptions}
+            options={replaceAppendRemoveOptions}
           />
           <Textarea
             aria-label={t('Models')}
@@ -283,16 +291,25 @@ export function ChannelAttributeFields(props: ChannelAttributeFieldsProps) {
           label={t('Model mapping mode')}
           value={props.value.modelMapping.mode}
           onChange={(value) =>
-            setField('modelMapping', { mode: value as 'replace' | 'merge' })
+            setField('modelMapping', {
+              mode: value as ChannelAttributeMergeMode,
+            })
           }
           disabled={disabled || !props.value.modelMapping.enabled}
-          options={replaceMergeOptions}
+          options={replaceMergeRemoveOptions}
         />
         <ModelMappingEditor
           value={props.value.modelMapping.value}
           onChange={(value) => setField('modelMapping', { value })}
           disabled={disabled || !props.value.modelMapping.enabled}
         />
+        {props.value.modelMapping.mode === 'remove' ? (
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'Remove mode deletes the listed request model names from each channel’s mapping; the upstream names are ignored.'
+            )}
+          </p>
+        ) : null}
       </div>
 
       {/* Groups */}
@@ -310,10 +327,10 @@ export function ChannelAttributeFields(props: ChannelAttributeFieldsProps) {
             label={t('Groups mode')}
             value={props.value.groups.mode}
             onChange={(value) =>
-              setField('groups', { mode: value as 'replace' | 'append' })
+              setField('groups', { mode: value as ChannelAttributeReplaceMode })
             }
             disabled={disabled || !props.value.groups.enabled}
-            options={replaceAppendOptions}
+            options={replaceAppendRemoveOptions}
           />
           {isLoadingGroups ? (
             <Skeleton className='h-10 flex-1' />
