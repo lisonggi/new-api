@@ -35,6 +35,17 @@ func SetWebRouter(router *gin.Engine, assets WebAssets, pluginDispatcher gin.Han
 				controller.RelayNotFound(c)
 				return
 			}
+			// Serve a build-time pre-rendered static page when one exists for the
+			// requested path (e.g. web/dist/about.html for /about). embed.FS rejects
+			// path traversal, so joining the request path is safe.
+			if c.Request.Method == http.MethodGet {
+				cleanPath := strings.TrimSuffix(c.Request.URL.Path, "/")
+				if data, err := assets.BuildFS.ReadFile("web/dist" + cleanPath + ".html"); err == nil {
+					c.Header("Cache-Control", "no-cache")
+					c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+					return
+				}
+			}
 			c.Header("Cache-Control", "no-cache")
 			c.Data(http.StatusOK, "text/html; charset=utf-8", assets.IndexPage)
 		},

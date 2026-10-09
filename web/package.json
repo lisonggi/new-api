@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "rsbuild dev",
-    "build": "rsbuild build",
+    "build": "rsbuild build && node scripts/prerender.mjs",
+    "prerender": "node scripts/prerender.mjs",
     "build:check": "tsgo -b && rsbuild build",
     "typecheck": "tsgo -b",
     "lint": "oxlint -c .oxlintrc.json .",
