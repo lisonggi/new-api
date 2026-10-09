@@ -63,4 +63,68 @@ describe('system config store branding', () => {
     )
     expect(useSystemConfigStore.getState().config.logo).toBe(DEFAULT_LOGO)
   })
+
+  it('does not throw and keeps build branding when the persisted state is malformed', async () => {
+    window.localStorage.setItem(STORAGE_KEY, '{not valid json')
+
+    await useSystemConfigStore.persist.rehydrate()
+
+    expect(useSystemConfigStore.getState().config.systemName).toBe(
+      DEFAULT_SYSTEM_NAME
+    )
+    expect(useSystemConfigStore.getState().config.logo).toBe(DEFAULT_LOGO)
+  })
+
+  it('resets branding when the persisted config omits the branding fields entirely', async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          config: { currency: { ...DEFAULT_CURRENCY_CONFIG } },
+          loadedLogoUrl: '/old.svg',
+        },
+        version: 0,
+      })
+    )
+
+    await useSystemConfigStore.persist.rehydrate()
+
+    expect(useSystemConfigStore.getState().config.systemName).toBe(
+      DEFAULT_SYSTEM_NAME
+    )
+    expect(useSystemConfigStore.getState().config.logo).toBe(DEFAULT_LOGO)
+    // A stale loadedLogoUrl must not equal the fresh logo, otherwise the logo
+    // would be treated as already loaded and never re-preloaded.
+    expect(useSystemConfigStore.getState().loadedLogoUrl).not.toBe(DEFAULT_LOGO)
+  })
+
+  it('preserves a persisted currency config through rehydration', async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          config: {
+            systemName: 'New API',
+            logo: '/old.svg',
+            currency: {
+              ...DEFAULT_CURRENCY_CONFIG,
+              quotaDisplayType: 'CNY',
+              usdExchangeRate: 7.2,
+            },
+          },
+          loadedLogoUrl: '/old.svg',
+        },
+        version: 0,
+      })
+    )
+
+    await useSystemConfigStore.persist.rehydrate()
+
+    expect(useSystemConfigStore.getState().config.currency.quotaDisplayType).toBe(
+      'CNY'
+    )
+    expect(
+      useSystemConfigStore.getState().config.currency.usdExchangeRate
+    ).toBe(7.2)
+  })
 })

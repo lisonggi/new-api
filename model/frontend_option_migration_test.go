@@ -178,3 +178,43 @@ func TestRetiredThemeOptionIsPersistedButNotPublished(t *testing.T) {
 	_, published := common.OptionMap[retiredThemeOptionKey]
 	assert.False(t, published)
 }
+
+// Adversarial: the backend no longer maintains branding. A stale SystemName /
+// Logo option row (or a legacy admin update) must be persisted but never
+// published to OptionMap, so `/api/status` and the admin option API stay free
+// of them.
+func TestBrandingOptionsArePersistedButNotPublished(t *testing.T) {
+	db := useFrontendOptionMigrationDB(t)
+	previousMap := common.OptionMap
+	t.Cleanup(func() { common.OptionMap = previousMap })
+	common.OptionMap = map[string]string{}
+
+	for _, key := range []string{"SystemName", "Logo"} {
+		require.NoError(t, UpdateOption(key, "hacked"))
+		assert.Equal(t, "hacked", requireOptionValue(t, db, key))
+		_, published := common.OptionMap[key]
+		assert.Falsef(t, published, "%s must not be published to OptionMap", key)
+	}
+}
+
+func TestStaleBrandingRowsAreDroppedFromOptionMap(t *testing.T) {
+	_ = useFrontendOptionMigrationDB(t)
+	previousMap := common.OptionMap
+	t.Cleanup(func() { common.OptionMap = previousMap })
+	common.OptionMap = map[string]string{
+		"SystemName": "old",
+		"Logo":       "/old.svg",
+		"Keep":       "v1",
+	}
+
+	// This is exactly what loadOptionsFromDatabase does for every DB row.
+	require.NoError(t, updateOptionMap("SystemName", "old"))
+	require.NoError(t, updateOptionMap("Logo", "/old.svg"))
+	require.NoError(t, updateOptionMap("Keep", "v2"))
+
+	_, hasName := common.OptionMap["SystemName"]
+	_, hasLogo := common.OptionMap["Logo"]
+	assert.False(t, hasName)
+	assert.False(t, hasLogo)
+	assert.Equal(t, "v2", common.OptionMap["Keep"])
+}

@@ -655,8 +655,9 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 
 	// 缓存命中率与 quota 使用相同的过滤范围；缓存命中数记录在 other JSON 中，
 	// 跨库没有统一的 JSON 提取语法，因此仍在应用层解析，但改为流式读取，
-	// 避免把区间内所有行一次性载入内存。
-	cacheQuery := LOG_DB.Table("logs").Select("other")
+	// 避免把区间内所有行一次性载入内存。COALESCE 兜底历史行里的 NULL other，
+	// 否则 Scan 到 string 会整段失败。
+	cacheQuery := LOG_DB.Table("logs").Select("COALESCE(other, '') other")
 
 	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
 		return stat, err
