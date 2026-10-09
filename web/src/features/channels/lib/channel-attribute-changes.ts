@@ -146,10 +146,14 @@ export function validateChannelAttributeChanges(
     return 'Model mapping is required'
   }
   if (changes.modelMapping.enabled) {
+    let parsed: unknown
     try {
-      JSON.parse(changes.modelMapping.value)
+      parsed = JSON.parse(changes.modelMapping.value)
     } catch {
       return 'Model mapping must be valid JSON'
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return 'Model mapping must be a valid JSON object'
     }
   }
   if (changes.groups.enabled && changes.groups.value.length === 0) {

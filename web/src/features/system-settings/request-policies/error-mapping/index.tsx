@@ -282,6 +282,9 @@ function ErrorMessageMappingEditor(props: { config: ErrorMappingConfig }) {
     previewSeqRef.current += 1
     setPreview(null)
     setPreviewLoading(false)
+    // Keep the JSON tab in step with the reset draft instead of showing the
+    // abandoned text.
+    setJsonText(JSON.stringify(baselineRef.current, null, 2))
     setJsonError(null)
     setDraft(baselineRef.current)
     setDirty(false)
@@ -301,6 +304,9 @@ function ErrorMessageMappingEditor(props: { config: ErrorMappingConfig }) {
         if (draftSeqRef.current === submittedSeq) {
           setDraft(saved)
           setDirty(false)
+          // Reflect the server-normalized config in the JSON tab.
+          setJsonText(JSON.stringify(saved, null, 2))
+          setJsonError(null)
         }
         toast.success(t('Saved'))
       },

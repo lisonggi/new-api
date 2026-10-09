@@ -240,6 +240,28 @@ describe('error message mapping settings', () => {
     expect(body.rules[0].keywords).toEqual(['reasoning_content'])
   })
 
+  it('resets the JSON editor text when the draft is reset', async () => {
+    renderSection()
+    await userEvent.click(await screen.findByRole('tab', { name: 'JSON' }))
+    const editor = screen.getByRole('textbox', { name: 'Mapping rules' })
+
+    // A valid edit makes the form dirty, so Reset becomes available.
+    fireEvent.input(editor, {
+      target: { value: JSON.stringify({ enabled: false, rules: [] }, null, 2) },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Reset' })).toBeEnabled()
+    )
+
+    // An invalid edit must not clobber the draft but should surface an error.
+    fireEvent.input(editor, { target: { value: '{ broken' } })
+    expect(await screen.findByText('Config must be valid JSON')).toBeVisible()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reset' }))
+    expect(editor).toHaveValue(JSON.stringify(serverConfig, null, 2))
+    expect(screen.queryByText('Config must be valid JSON')).toBeNull()
+  })
+
   it('rejects a keyword longer than the rune limit', async () => {
     renderSection()
     await userEvent.click(

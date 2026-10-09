@@ -112,6 +112,16 @@ func TestEditChannelBatchRemoveMode(t *testing.T) {
 	assert.Equal(t, "default", reloaded.Group)
 	require.NotNil(t, reloaded.ModelMapping)
 	assert.JSONEq(t, `{"claude-3":"claude-3-mini"}`, *reloaded.ModelMapping)
+
+	// A non-object mapping is rejected defensively and leaves the row alone.
+	badBody := fmt.Sprintf(
+		`{"ids":[%d],"model_mapping":"[1,2]","model_mapping_mode":"remove"}`,
+		channel.Id,
+	)
+	bad := callChannelBatchHandler(t, EditChannelBatch, 1, common.RoleRootUser, badBody)
+	assert.Contains(t, bad.Body.String(), `"success":false`)
+	require.NoError(t, model.DB.First(&reloaded, channel.Id).Error)
+	assert.JSONEq(t, `{"claude-3":"claude-3-mini"}`, *reloaded.ModelMapping)
 }
 
 func TestEditChannelBatchSettingsRequiresSensitiveWrite(t *testing.T) {

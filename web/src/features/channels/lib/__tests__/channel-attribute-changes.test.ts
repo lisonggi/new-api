@@ -161,6 +161,18 @@ test('invalid model mapping JSON is rejected', () => {
   expect(validateChannelAttributeChanges(changes)).toBe(
     'Model mapping must be valid JSON'
   )
+
+  const array = emptyChannelAttributeChanges()
+  array.modelMapping = { enabled: true, mode: 'remove', value: '[1,2]' }
+  expect(validateChannelAttributeChanges(array)).toBe(
+    'Model mapping must be a valid JSON object'
+  )
+
+  const scalar = emptyChannelAttributeChanges()
+  scalar.modelMapping = { enabled: true, mode: 'merge', value: '"gpt-4o"' }
+  expect(validateChannelAttributeChanges(scalar)).toBe(
+    'Model mapping must be a valid JSON object'
+  )
 })
 
 test('an out-of-range first response timeout tier is rejected', () => {

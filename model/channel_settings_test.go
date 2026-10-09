@@ -634,6 +634,16 @@ func TestEditChannelByTagPatchesChannelSettings(t *testing.T) {
 			assert.Equal(t, mergeProxy, gotSource.GetSetting().Proxy)
 			require.NotNil(t, gotSource.Tag)
 			assert.Equal(t, "target-tag", *gotSource.Tag)
+
+			// The remove mode also runs through the tag path, because both batch
+			// entries share the per-channel rewrite.
+			seedModels := "gpt-4o,claude-3"
+			require.NoError(t, EditChannelByTag("surplus-a", nil, ChannelBatchFields{Models: &seedModels}))
+			removeModels := "claude-3"
+			require.NoError(t, EditChannelByTag("surplus-a", nil, ChannelBatchFields{Models: &removeModels, ModelsMode: "remove"}))
+			var gotA3 Channel
+			require.NoError(t, db.First(&gotA3, channels[0].Id).Error)
+			assert.Equal(t, "gpt-4o", gotA3.Models)
 		})
 	}
 }
@@ -1001,6 +1011,58 @@ func TestEditChannelByIDsBatchAdversarial(t *testing.T) {
 			mergedB := map[string]string{}
 			require.NoError(t, common.UnmarshalJsonStr(*gotB.ModelMapping, &mergedB))
 			assert.Equal(t, map[string]string{"z": "w"}, mergedB)
+
+			// Remove models: subtract from the current list, keep the order and
+			// drop the listed items; unknown items are a no-op.
+			removeModels := " gpt-4.1 , missing ,"
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Models: &removeModels, ModelsMode: "remove"}))
+			reload()
+			assert.Equal(t, "gpt-4o,claude-3", gotA.Models)
+
+			// Removing every model leaves an empty list, and removing from an
+			// already-empty list stays empty.
+			removeAll := "gpt-4o,gpt-4.1"
+			require.NoError(t, EditChannelByIDs([]int{b}, ChannelBatchFields{Models: &removeAll, ModelsMode: "remove"}))
+			reload()
+			assert.Empty(t, gotB.Models)
+			require.NoError(t, EditChannelByIDs([]int{b}, ChannelBatchFields{Models: &removeAll, ModelsMode: "remove"}))
+			reload()
+			assert.Empty(t, gotB.Models)
+
+			// Remove a present group and keep the rest; a missing group is a
+			// no-op.
+			removePresent := "vip"
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Group: &removePresent, GroupMode: "remove"}))
+			reload()
+			assert.Equal(t, "default", gotA.Group)
+			removeMissingGroup := "nope"
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Group: &removeMissingGroup, GroupMode: "remove"}))
+			reload()
+			assert.Equal(t, "default", gotA.Group)
+
+			// Remove a mapping key and keep the rest.
+			removeKey := `{"gpt-4.1":"ignored"}`
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{ModelMapping: &removeKey, ModelMappingMode: "remove"}))
+			reload()
+			removedKeys := map[string]string{}
+			require.NoError(t, common.UnmarshalJsonStr(*gotA.ModelMapping, &removedKeys))
+			assert.Empty(t, removedKeys)
+
+			// Remove over a malformed stored value falls back to an empty object
+			// instead of erroring, mirroring merge.
+			malformedForRemove := `{not json`
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{ModelMapping: &malformedForRemove}))
+			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{ModelMapping: &removeKey, ModelMappingMode: "remove"}))
+			reload()
+			malformedRemoved := map[string]string{}
+			require.NoError(t, common.UnmarshalJsonStr(*gotA.ModelMapping, &malformedRemoved))
+			assert.Empty(t, malformedRemoved)
+
+			// A non-object remove payload is rejected before any write.
+			arrayRemove := `[1,2]`
+			require.Error(t, EditChannelByIDs([]int{b}, ChannelBatchFields{ModelMapping: &arrayRemove, ModelMappingMode: "remove"}))
+			reload()
+			assert.Equal(t, `{"z":"w"}`, *gotB.ModelMapping)
 
 			// A settings patch keeps the unrelated setting fields and the raw
 			// bytes of a stored-but-invalid error_retry_policy.
