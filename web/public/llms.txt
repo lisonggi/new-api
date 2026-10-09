@@ -1,0 +1,22 @@
+# iioooo
+
+> iioooo 是新一代 AI 大模型 API 中转平台，提供高速稳定的模型调用与低成本接入解决方案，聚合 OpenAI、Claude、Gemini、DeepSeek 等数百款主流大模型，支持对话、图像、向量、语音等多类型接口，一个密钥即可调用全部模型。
+
+## 核心信息
+
+- 名称：iioooo
+- 官网：https://io.iioooo.com/
+- 定位：AI 大模型 API 中转平台 / API 网关
+- 优势：速度快、折扣大、模型多、兼容 OpenAI 接口
+- 支持模型：OpenAI、Anthropic Claude、Google Gemini、DeepSeek、通义千问、文心一言、智谱 GLM、Kimi、豆包等数百款
+- 接口类型：对话（Chat）、图像（Image）、向量（Embedding）、语音（Audio）等
+- 计费：按量计费，一个 API 密钥调用全部模型
+
+## 页面
+
+- [首页](https://io.iioooo.com/)
+- [关于](https://io.iioooo.com/about)
+- [模型与价格](https://io.iioooo.com/pricing)
+- [排行榜](https://io.iioooo.com/rankings)
+- [隐私政策](https://io.iioooo.com/privacy-policy)
+- [用户协议](https://io.iioooo.com/user-agreement)

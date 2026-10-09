@@ -1,4 +1,9 @@
 # robots.txt for https://io.iioooo.com/
+#
+# Search and AI crawlers (Googlebot, Bingbot, Baiduspider, GPTBot,
+# OAI-SearchBot, ChatGPT-User, ClaudeBot, PerplexityBot, Google-Extended,
+# Applebot, Amazonbot, ...) are welcome to crawl the public pages listed in the
+# sitemap below. Only account/console, auth, API and error paths are blocked.
 User-agent: *
 Allow: /
 
