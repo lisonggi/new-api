@@ -37,7 +37,8 @@ interface ErrorMappingRulesTableProps {
 export function ErrorMappingRulesTable(props: ErrorMappingRulesTableProps) {
   const { t } = useTranslation()
 
-  const ruleLabel = (rule: ErrorMappingRule) => rule.name || rule.keyword
+  const ruleLabel = (rule: ErrorMappingRule) =>
+    rule.name || rule.keywords.join(', ')
 
   return (
     <RuleListTable
@@ -48,7 +49,7 @@ export function ErrorMappingRulesTable(props: ErrorMappingRulesTableProps) {
       empty={{
         title: t('No mapping rules yet'),
         description: t(
-          'Add a rule to replace a client-facing error message when it contains a keyword.'
+          'Add a rule to replace a client-facing error message when it contains any of the keywords.'
         ),
         actionLabel: t('Add mapping rule'),
         actionIcon: Plus,
@@ -74,7 +75,7 @@ export function ErrorMappingRulesTable(props: ErrorMappingRulesTableProps) {
           cell: (rule, index) => (
             <div className='flex min-w-0 flex-col gap-1.5'>
               <TruncatedCell tabIndex={0}>
-                {rule.name || rule.keyword || '—'}
+                {rule.name || rule.keywords.join(', ') || '—'}
               </TruncatedCell>
               <div className='text-muted-foreground min-w-0 text-xs'>
                 <TruncatedCell tabIndex={0}>{rule.id}</TruncatedCell>
@@ -86,12 +87,15 @@ export function ErrorMappingRulesTable(props: ErrorMappingRulesTableProps) {
           ),
         },
         {
-          id: 'keyword',
-          header: t('Keyword'),
+          id: 'keywords',
+          header: t('Keywords'),
           className: 'w-[20%]',
           cell: (rule) => (
-            <TruncatedCell tabIndex={0} tooltipContent={rule.keyword}>
-              <code>{rule.keyword}</code>
+            <TruncatedCell
+              tabIndex={0}
+              tooltipContent={rule.keywords.join(', ')}
+            >
+              <code>{rule.keywords.join(', ')}</code>
             </TruncatedCell>
           ),
         },

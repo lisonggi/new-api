@@ -21,7 +21,7 @@ export type ErrorMappingRule = {
   id: string
   name: string
   enabled: boolean
-  keyword: string
+  keywords: string[]
   case_sensitive: boolean
   replacement: string
 }

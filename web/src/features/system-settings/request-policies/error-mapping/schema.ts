@@ -31,14 +31,18 @@ export const errorMappingRuleSchema = z.object({
       (value) => countCodePoints(value) <= ERROR_MAPPING_LIMITS.maxNameLength,
       { message: 'Name is too long' }
     ),
-  keyword: z
-    .string()
-    .refine((value) => value.trim().length > 0, {
+  keywords: z
+    .array(z.string())
+    .min(1, { message: 'Keyword is required' })
+    .refine((values) => values.every((value) => value.trim().length > 0), {
       message: 'Keyword is required',
     })
     .refine(
-      (value) =>
-        countCodePoints(value) <= ERROR_MAPPING_LIMITS.maxKeywordLength,
+      (values) =>
+        values.every(
+          (value) =>
+            countCodePoints(value) <= ERROR_MAPPING_LIMITS.maxKeywordLength
+        ),
       { message: 'Keyword is too long' }
     ),
   case_sensitive: z.boolean(),

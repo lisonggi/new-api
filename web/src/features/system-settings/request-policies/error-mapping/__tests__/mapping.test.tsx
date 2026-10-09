@@ -45,11 +45,19 @@ const makeRule = (
   id: 'rule-1',
   name: 'Reasoning format',
   enabled: true,
-  keyword: 'reasoning_content',
+  keywords: ['reasoning_content'],
   case_sensitive: false,
   replacement: 'Please adjust the request and retry.',
   ...overrides,
 })
+
+// TagInput commits a keyword on Enter (or comma/blur), so a test must fire the
+// key event after typing the inner input value.
+function addKeyword(dialog: HTMLElement, keyword: string) {
+  const input = within(dialog).getByRole('textbox', { name: /Keyword/ })
+  fireEvent.change(input, { target: { value: keyword } })
+  fireEvent.keyDown(input, { key: 'Enter' })
+}
 
 function renderSection() {
   function Harness() {
@@ -103,7 +111,11 @@ describe('error message mapping settings', () => {
       enabled: true,
       rules: [
         makeRule(),
-        makeRule({ id: 'rule-2', name: 'Tool choice', keyword: 'tool_choice' }),
+        makeRule({
+          id: 'rule-2',
+          name: 'Tool choice',
+          keywords: ['tool_choice'],
+        }),
       ],
     }
     renderSection()
@@ -134,9 +146,7 @@ describe('error message mapping settings', () => {
       await screen.findByRole('button', { name: 'Add mapping rule' })
     )
     const dialog = await screen.findByRole('dialog')
-    fireEvent.change(within(dialog).getByRole('textbox', { name: /Keyword/ }), {
-      target: { value: 'tool_choice' },
-    })
+    addKeyword(dialog, 'tool_choice')
     fireEvent.change(
       within(dialog).getByRole('textbox', { name: /Replacement/ }),
       { target: { value: 'Tools are not available here.' } }
@@ -152,11 +162,37 @@ describe('error message mapping settings', () => {
     const body = vi.mocked(api.put).mock.calls[0][1] as ErrorMappingConfig
     expect(body.rules).toHaveLength(2)
     expect(body.rules[1]).toMatchObject({
-      keyword: 'tool_choice',
+      keywords: ['tool_choice'],
       enabled: true,
       case_sensitive: false,
     })
     expect(body.rules[1].id).not.toBe('')
+  })
+
+  it('saves several keywords for one rule so multiple errors share a replacement', async () => {
+    renderSection()
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Add mapping rule' })
+    )
+    const dialog = await screen.findByRole('dialog')
+    addKeyword(dialog, 'first_alias')
+    addKeyword(dialog, 'second_alias')
+    fireEvent.change(
+      within(dialog).getByRole('textbox', { name: /Replacement/ }),
+      { target: { value: 'Shared replacement.' } }
+    )
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    const body = vi.mocked(api.put).mock.calls[0][1] as ErrorMappingConfig
+    expect(body.rules[1]).toMatchObject({
+      keywords: ['first_alias', 'second_alias'],
+      replacement: 'Shared replacement.',
+    })
   })
 
   it('rejects a keyword longer than the rune limit', async () => {
@@ -165,9 +201,7 @@ describe('error message mapping settings', () => {
       await screen.findByRole('button', { name: 'Add mapping rule' })
     )
     const dialog = await screen.findByRole('dialog')
-    fireEvent.change(within(dialog).getByRole('textbox', { name: /Keyword/ }), {
-      target: { value: 'a'.repeat(257) },
-    })
+    addKeyword(dialog, 'a'.repeat(257))
     fireEvent.change(
       within(dialog).getByRole('textbox', { name: /Replacement/ }),
       { target: { value: 'x' } }
@@ -185,9 +219,7 @@ describe('error message mapping settings', () => {
     const dialog = await screen.findByRole('dialog')
     // 256 emoji is exactly at the rune limit even though its UTF-16 length is
     // 512; 257 is one over. This fails if the limit uses string.length.
-    fireEvent.change(within(dialog).getByRole('textbox', { name: /Keyword/ }), {
-      target: { value: '😀'.repeat(257) },
-    })
+    addKeyword(dialog, '😀'.repeat(257))
     fireEvent.change(
       within(dialog).getByRole('textbox', { name: /Replacement/ }),
       { target: { value: 'x' } }
@@ -195,9 +227,10 @@ describe('error message mapping settings', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
     expect(await within(dialog).findByText('Keyword is too long')).toBeVisible()
 
-    fireEvent.change(within(dialog).getByRole('textbox', { name: /Keyword/ }), {
-      target: { value: '😀'.repeat(256) },
-    })
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Remove tag' })
+    )
+    addKeyword(dialog, '😀'.repeat(256))
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
     await waitFor(() =>
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -247,8 +280,12 @@ describe('error message mapping settings', () => {
     serverConfig = {
       enabled: true,
       rules: [
-        makeRule({ id: 'first', name: 'First', keyword: 'first_keyword' }),
-        makeRule({ id: 'second', name: 'Second', keyword: 'second_keyword' }),
+        makeRule({ id: 'first', name: 'First', keywords: ['first_keyword'] }),
+        makeRule({
+          id: 'second',
+          name: 'Second',
+          keywords: ['second_keyword'],
+        }),
       ],
     }
     renderSection()
@@ -292,7 +329,11 @@ describe('error message mapping settings', () => {
     serverConfig = {
       enabled: true,
       rules: [
-        makeRule({ id: 'other', name: 'Other', keyword: 'refetched_keyword' }),
+        makeRule({
+          id: 'other',
+          name: 'Other',
+          keywords: ['refetched_keyword'],
+        }),
       ],
     }
     await act(async () => {
@@ -314,7 +355,7 @@ describe('error message mapping settings', () => {
         makeRule({
           id: 'alpha',
           name: 'Alpha',
-          keyword: 'alpha_error',
+          keywords: ['alpha_error'],
           replacement: 'Replaced by alpha.',
         }),
       ],
@@ -332,7 +373,7 @@ describe('error message mapping settings', () => {
     expect(posted).toMatchObject({ message: 'saw alpha_error here' })
     expect(
       (posted as { config: ErrorMappingConfig }).config.rules[0]
-    ).toMatchObject({ keyword: 'alpha_error', enabled: true })
+    ).toMatchObject({ keywords: ['alpha_error'], enabled: true })
 
     await userEvent.click(
       screen.getByRole('switch', { name: 'Enable rule Alpha' })
@@ -583,7 +624,7 @@ describe('error message mapping settings', () => {
         makeRule({
           id: `rule-${index}`,
           name: `Rule ${index}`,
-          keyword: `keyword_${index}`,
+          keywords: [`keyword_${index}`],
         })
       ),
     }

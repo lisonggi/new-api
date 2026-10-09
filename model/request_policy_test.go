@@ -124,7 +124,7 @@ func TestRequestPolicyDatabaseMatrix(t *testing.T) {
 }
 
 func TestErrorMessageMappingDatabaseMatrix(t *testing.T) {
-	const configJSON = `{"enabled":true,"rules":[{"id":"reasoning-format","name":"思考模式格式错误","enabled":true,"keyword":"reasoning_content","case_sensitive":false,"replacement":"当前请求格式与模型不兼容，请调整后重试。"}]}`
+	const configJSON = `{"enabled":true,"rules":[{"id":"reasoning-format","name":"思考模式格式错误","enabled":true,"keywords":["reasoning_content"],"case_sensitive":false,"replacement":"当前请求格式与模型不兼容，请调整后重试。"}]}`
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
 			var driver gorm.Dialector
@@ -258,11 +258,11 @@ func TestErrorMessageMappingDatabaseMatrix(t *testing.T) {
 			}
 			// Concurrent readers must always observe one complete snapshot while a
 			// save swaps in the next one. Run with -race.
-			first, err := error_mapping.ParseConfig([]byte(`{"enabled":true,"rules":[{"id":"first","enabled":true,"keyword":"first-keyword","case_sensitive":false,"replacement":"FIRST"}]}`))
+			first, err := error_mapping.ParseConfig([]byte(`{"enabled":true,"rules":[{"id":"first","enabled":true,"keywords":["first-keyword"],"case_sensitive":false,"replacement":"FIRST"}]}`))
 			require.NoError(t, err)
 			_, err = SaveErrorMessageMapping(first)
 			require.NoError(t, err)
-			second, err := error_mapping.ParseConfig([]byte(`{"enabled":true,"rules":[{"id":"second","enabled":true,"keyword":"second-keyword","case_sensitive":false,"replacement":"SECOND"}]}`))
+			second, err := error_mapping.ParseConfig([]byte(`{"enabled":true,"rules":[{"id":"second","enabled":true,"keywords":["second-keyword"],"case_sensitive":false,"replacement":"SECOND"}]}`))
 			require.NoError(t, err)
 			start := make(chan struct{})
 			seen := make(chan string, 32)

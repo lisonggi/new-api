@@ -199,7 +199,7 @@ func withDebugEnabled(t *testing.T, enabled bool) {
 	})
 }
 
-const errorMessageMappingReasoningConfig = `{"enabled":true,"rules":[{"id":"r1","enabled":true,"keyword":"reasoning_content","case_sensitive":false,"replacement":"REPLACED"}]}`
+const errorMessageMappingReasoningConfig = `{"enabled":true,"rules":[{"id":"r1","enabled":true,"keywords":["reasoning_content"],"case_sensitive":false,"replacement":"REPLACED"}]}`
 
 func newErrorMessageMappingTestContext(t *testing.T, client, configJSON string) *gin.Context {
 	t.Helper()
@@ -305,7 +305,7 @@ func TestPrepareErrorMessageMappingSSEFrame(t *testing.T) {
 }
 
 func TestPrepareErrorMessageMappingSSEFrameDisabledStillTracksTerminal(t *testing.T) {
-	c := newErrorMessageMappingTestContext(t, ErrorMessageMappingClientOpenAI, `{"enabled":false,"rules":[{"id":"r1","enabled":true,"keyword":"reasoning_content","case_sensitive":false,"replacement":"REPLACED"}]}`)
+	c := newErrorMessageMappingTestContext(t, ErrorMessageMappingClientOpenAI, `{"enabled":false,"rules":[{"id":"r1","enabled":true,"keywords":["reasoning_content"],"case_sensitive":false,"replacement":"REPLACED"}]}`)
 	payload := `{"error":{"message":"bad reasoning_content"}}`
 	mapped, terminal := PrepareErrorMessageMappingSSEFrame(c, []byte(payload))
 	require.True(t, terminal)
@@ -313,7 +313,7 @@ func TestPrepareErrorMessageMappingSSEFrameDisabledStillTracksTerminal(t *testin
 }
 
 func TestPrepareErrorMessageMappingSSEFrameIsNotRecursive(t *testing.T) {
-	const cfg = `{"enabled":true,"rules":[{"id":"a","enabled":true,"keyword":"alpha","case_sensitive":false,"replacement":"beta"},{"id":"b","enabled":true,"keyword":"beta","case_sensitive":false,"replacement":"gamma"}]}`
+	const cfg = `{"enabled":true,"rules":[{"id":"a","enabled":true,"keywords":["alpha"],"case_sensitive":false,"replacement":"beta"},{"id":"b","enabled":true,"keywords":["beta"],"case_sensitive":false,"replacement":"gamma"}]}`
 	c := newErrorMessageMappingTestContext(t, ErrorMessageMappingClientOpenAI, cfg)
 	mapped, terminal := PrepareErrorMessageMappingSSEFrame(c, []byte(`{"error":{"message":"alpha"}}`))
 	require.True(t, terminal)
@@ -321,7 +321,7 @@ func TestPrepareErrorMessageMappingSSEFrameIsNotRecursive(t *testing.T) {
 }
 
 func TestPrepareErrorMessageMappingSSEFrameMasksBeforeMatching(t *testing.T) {
-	const cfg = `{"enabled":true,"rules":[{"id":"domain","enabled":true,"keyword":"example.com","case_sensitive":false,"replacement":"REPLACED"}]}`
+	const cfg = `{"enabled":true,"rules":[{"id":"domain","enabled":true,"keywords":["example.com"],"case_sensitive":false,"replacement":"REPLACED"}]}`
 	c := newErrorMessageMappingTestContext(t, ErrorMessageMappingClientOpenAI, cfg)
 	payload := `{"error":{"message":"failed at https://api.example.com/v1"}}`
 	mapped, terminal := PrepareErrorMessageMappingSSEFrame(c, []byte(payload))

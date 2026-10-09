@@ -74,7 +74,8 @@ function sameErrorMessageMappingConfig(
       rule.id === other.id &&
       rule.name === other.name &&
       rule.enabled === other.enabled &&
-      rule.keyword === other.keyword &&
+      rule.keywords.length === other.keywords.length &&
+      rule.keywords.every((keyword, i) => keyword === other.keywords[i]) &&
       rule.case_sensitive === other.case_sensitive &&
       rule.replacement === other.replacement
     )
@@ -309,7 +310,7 @@ function ErrorMessageMappingEditor(props: { config: ErrorMappingConfig }) {
         <SettingsCard
           title={t('Error message mapping')}
           description={t(
-            'Replace the client-facing error message of supported APIs when it contains a keyword. Internal logs, retries and channel health keep the original error.'
+            'Replace the client-facing error message of supported APIs when it contains any of the keywords. Internal logs, retries and channel health keep the original error.'
           )}
           className='shadow-none'
         >
@@ -471,7 +472,7 @@ function ErrorMessageMappingEditor(props: { config: ErrorMappingConfig }) {
             {
               name:
                 draft.rules[deletingIndex].name ||
-                draft.rules[deletingIndex].keyword,
+                draft.rules[deletingIndex].keywords.join(', '),
             }
           )}
           confirmText={t('Delete mapping rule')}

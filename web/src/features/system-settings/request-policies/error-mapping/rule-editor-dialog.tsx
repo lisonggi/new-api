@@ -22,6 +22,7 @@ import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
+import { TagInput } from '@/components/tag-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -45,7 +46,7 @@ interface Props {
 
 const EMPTY_VALUES: ErrorMappingRuleFormValues = {
   name: '',
-  keyword: '',
+  keywords: [],
   case_sensitive: false,
   replacement: '',
 }
@@ -63,7 +64,7 @@ export function RuleEditorDialog(props: Props) {
     if (props.rule) {
       form.reset({
         name: props.rule.name,
-        keyword: props.rule.keyword,
+        keywords: props.rule.keywords,
         case_sensitive: props.rule.case_sensitive,
         replacement: props.rule.replacement,
       })
@@ -78,7 +79,7 @@ export function RuleEditorDialog(props: Props) {
       id: props.rule?.id ?? crypto.randomUUID(),
       name: values.name.trim(),
       enabled: props.rule?.enabled ?? true,
-      keyword: values.keyword,
+      keywords: values.keywords,
       case_sensitive: values.case_sensitive,
       replacement: values.replacement,
     })
@@ -93,7 +94,7 @@ export function RuleEditorDialog(props: Props) {
       onOpenChange={props.onOpenChange}
       title={isEdit ? t('Edit mapping rule') : t('Add mapping rule')}
       description={t(
-        'When the client-facing error message contains the keyword, the whole message is replaced.'
+        'When the client-facing error message contains any of the keywords, the whole message is replaced.'
       )}
       contentClassName='sm:max-w-xl'
       footer={
@@ -140,34 +141,40 @@ export function RuleEditorDialog(props: Props) {
 
         <div className='grid gap-1.5'>
           <Label required htmlFor='error-mapping-rule-keyword'>
-            {t('Keyword')}
+            {t('Keywords')}
           </Label>
-          <Input
+          <TagInput
             id='error-mapping-rule-keyword'
-            placeholder='reasoning_content'
-            aria-invalid={Boolean(errors.keyword)}
-            aria-describedby={
-              errors.keyword
+            value={form.watch('keywords')}
+            onChange={(keywords) =>
+              form.setValue('keywords', keywords, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
+            placeholder={t('Add keywords...')}
+            ariaInvalid={Boolean(errors.keywords)}
+            ariaDescribedBy={
+              errors.keywords
                 ? 'error-mapping-rule-keyword-help error-mapping-rule-keyword-error'
                 : 'error-mapping-rule-keyword-help'
             }
-            {...form.register('keyword')}
           />
           <p
             id='error-mapping-rule-keyword-help'
             className='text-muted-foreground text-xs'
           >
             {t(
-              'Matching is a plain “contains” check, not a regular expression.'
+              'Add one or more keywords. The rule matches when the message contains any of them, and matching is a plain “contains” check, not a regular expression.'
             )}
           </p>
-          {errors.keyword ? (
+          {errors.keywords ? (
             <p
               id='error-mapping-rule-keyword-error'
               role='alert'
               className='text-destructive text-sm'
             >
-              {t(errors.keyword.message ?? '')}
+              {t(errors.keywords.message ?? '')}
             </p>
           ) : null}
         </div>
@@ -206,7 +213,7 @@ export function RuleEditorDialog(props: Props) {
           }
           label={t('Case sensitive')}
           description={t(
-            'When off, the keyword is matched after lowercasing both sides.'
+            'When off, the keywords are matched after lowercasing both sides.'
           )}
         />
       </form>

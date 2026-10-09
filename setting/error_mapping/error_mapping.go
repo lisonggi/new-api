@@ -83,14 +83,16 @@ const (
 const defaultJSON = `{"enabled":false,"rules":[]}`
 
 // Rule is one ordered match rule. The order in Config.Rules is the priority
-// order: the first enabled match wins.
+// order: the first enabled match wins. A rule matches when the client-facing
+// message contains any of its keywords, so several error variants can share one
+// replacement.
 type Rule struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Enabled       bool   `json:"enabled"`
-	Keyword       string `json:"keyword"`
-	CaseSensitive bool   `json:"case_sensitive"`
-	Replacement   string `json:"replacement"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Enabled       bool     `json:"enabled"`
+	Keywords      []string `json:"keywords"`
+	CaseSensitive bool     `json:"case_sensitive"`
+	Replacement   string   `json:"replacement"`
 }
 
 // Config is the persisted and transmitted shape of the whole feature.
@@ -117,14 +119,21 @@ func DefaultJSON() string {
 	return defaultJSON
 }
 
-// Clone returns a deep-enough copy: Rule carries no reference fields. A non-nil
-// empty slice stays a non-nil empty slice so callers that serialize the clone
-// keep emitting [] instead of null.
+// Clone returns a deep copy, including each rule's keyword slice, so a caller
+// cannot mutate the published config. A non-nil empty slice stays a non-nil
+// empty slice so callers that serialize the clone keep emitting [] instead of
+// null.
 func (c Config) Clone() Config {
 	cloned := c
 	if c.Rules != nil {
 		cloned.Rules = make([]Rule, len(c.Rules))
-		copy(cloned.Rules, c.Rules)
+		for index, rule := range c.Rules {
+			cloned.Rules[index] = rule
+			if rule.Keywords != nil {
+				cloned.Rules[index].Keywords = make([]string, len(rule.Keywords))
+				copy(cloned.Rules[index].Keywords, rule.Keywords)
+			}
+		}
 	}
 	return cloned
 }
@@ -219,7 +228,7 @@ func parseRule(raw common.RawMessage, index int) (Rule, error) {
 	}
 	for key := range fields {
 		switch key {
-		case "id", "name", "enabled", "keyword", "case_sensitive", "replacement":
+		case "id", "name", "enabled", "keywords", "keyword", "case_sensitive", "replacement":
 		default:
 			return Rule{}, newConfigError(CodeRuleUnknownField, fmt.Sprintf("rule %d: unknown field %q", index, key), map[string]any{"Index": index, "Field": key})
 		}
@@ -233,7 +242,7 @@ func parseRule(raw common.RawMessage, index int) (Rule, error) {
 	if err != nil {
 		return Rule{}, err
 	}
-	keyword, err := requiredRuleString(fields, "keyword", index)
+	keywords, err := parseRuleKeywords(fields, index)
 	if err != nil {
 		return Rule{}, err
 	}
@@ -254,10 +263,43 @@ func parseRule(raw common.RawMessage, index int) (Rule, error) {
 		ID:            id,
 		Name:          name,
 		Enabled:       enabled,
-		Keyword:       keyword,
+		Keywords:      keywords,
 		CaseSensitive: caseSensitive,
 		Replacement:   replacement,
 	}, nil
+}
+
+// parseRuleKeywords reads the keyword list. The current format is a "keywords"
+// array; a legacy single "keyword" string is still accepted and migrated to a
+// one-element list so stored configs keep loading.
+func parseRuleKeywords(fields map[string]common.RawMessage, index int) ([]string, error) {
+	rawKeywords, ok := fields["keywords"]
+	if ok {
+		if isJSONNull(rawKeywords) {
+			return nil, newConfigError(CodeFieldNotString, fmt.Sprintf("rule %d: keywords must be an array of strings", index), map[string]any{"Index": index, "Field": "keywords"})
+		}
+		var rawList []common.RawMessage
+		if err := common.Unmarshal(rawKeywords, &rawList); err != nil {
+			return nil, newConfigError(CodeFieldNotString, fmt.Sprintf("rule %d: keywords must be an array of strings", index), map[string]any{"Index": index, "Field": "keywords"})
+		}
+		keywords := make([]string, 0, len(rawList))
+		for _, rawKeyword := range rawList {
+			var keyword string
+			if isJSONNull(rawKeyword) || common.Unmarshal(rawKeyword, &keyword) != nil {
+				return nil, newConfigError(CodeFieldNotString, fmt.Sprintf("rule %d: keywords must be an array of strings", index), map[string]any{"Index": index, "Field": "keywords"})
+			}
+			keywords = append(keywords, keyword)
+		}
+		return keywords, nil
+	}
+	if _, hasLegacy := fields["keyword"]; hasLegacy {
+		keyword, err := optionalRuleString(fields, "keyword", index)
+		if err != nil {
+			return nil, err
+		}
+		return []string{keyword}, nil
+	}
+	return nil, newConfigError(CodeKeywordRequired, fmt.Sprintf("rule %d: keyword is required", index), map[string]any{"Index": index})
 }
 
 // Validate checks limits, identifier shape and duplicate identifiers.
@@ -285,14 +327,19 @@ func validateRule(rule Rule, index int) error {
 	if utf8.RuneCountInString(rule.Name) > MaxNameLength {
 		return newConfigError(CodeNameTooLong, fmt.Sprintf("rule %d: name is too long (max %d characters)", index, MaxNameLength), map[string]any{"Index": index, "Max": MaxNameLength})
 	}
-	if utf8.RuneCountInString(rule.Keyword) == 0 {
+	if len(rule.Keywords) == 0 {
 		return newConfigError(CodeKeywordRequired, fmt.Sprintf("rule %d: keyword is required", index), map[string]any{"Index": index})
 	}
-	if utf8.RuneCountInString(rule.Keyword) > MaxKeywordLength {
-		return newConfigError(CodeKeywordTooLong, fmt.Sprintf("rule %d: keyword is too long (max %d characters)", index, MaxKeywordLength), map[string]any{"Index": index, "Max": MaxKeywordLength})
-	}
-	if strings.TrimSpace(rule.Keyword) == "" {
-		return newConfigError(CodeKeywordBlank, fmt.Sprintf("rule %d: keyword must not be blank", index), map[string]any{"Index": index})
+	for _, keyword := range rule.Keywords {
+		if utf8.RuneCountInString(keyword) == 0 {
+			return newConfigError(CodeKeywordRequired, fmt.Sprintf("rule %d: keyword is required", index), map[string]any{"Index": index})
+		}
+		if utf8.RuneCountInString(keyword) > MaxKeywordLength {
+			return newConfigError(CodeKeywordTooLong, fmt.Sprintf("rule %d: keyword is too long (max %d characters)", index, MaxKeywordLength), map[string]any{"Index": index, "Max": MaxKeywordLength})
+		}
+		if strings.TrimSpace(keyword) == "" {
+			return newConfigError(CodeKeywordBlank, fmt.Sprintf("rule %d: keyword must not be blank", index), map[string]any{"Index": index})
+		}
 	}
 	if utf8.RuneCountInString(rule.Replacement) == 0 {
 		return newConfigError(CodeReplacementRequired, fmt.Sprintf("rule %d: replacement is required", index), map[string]any{"Index": index})
@@ -373,13 +420,18 @@ func requiredRuleBool(fields map[string]common.RawMessage, key string, index int
 	return value, nil
 }
 
-// compiledRule holds a rule with its precomputed lowercase keyword. Rules are
-// private to Matcher so a published matcher stays immutable.
+// compiledKeyword is one keyword with its precomputed lowercase form.
+type compiledKeyword struct {
+	keyword      string
+	lowerKeyword string
+}
+
+// compiledRule holds a rule with its precomputed keywords. Rules are private to
+// Matcher so a published matcher stays immutable.
 type compiledRule struct {
 	id            string
 	enabled       bool
-	keyword       string
-	lowerKeyword  string
+	keywords      []compiledKeyword
 	caseSensitive bool
 	replacement   string
 }
@@ -402,20 +454,24 @@ func Compile(cfg Config) (*Matcher, error) {
 		compiled := compiledRule{
 			id:            rule.ID,
 			enabled:       rule.Enabled,
-			keyword:       rule.Keyword,
+			keywords:      make([]compiledKeyword, 0, len(rule.Keywords)),
 			caseSensitive: rule.CaseSensitive,
 			replacement:   rule.Replacement,
 		}
-		if !rule.CaseSensitive {
-			compiled.lowerKeyword = strings.ToLower(rule.Keyword)
+		for _, keyword := range rule.Keywords {
+			entry := compiledKeyword{keyword: keyword}
+			if !rule.CaseSensitive {
+				entry.lowerKeyword = strings.ToLower(keyword)
+			}
+			compiled.keywords = append(compiled.keywords, entry)
 		}
 		matcher.rules = append(matcher.rules, compiled)
 	}
 	return matcher, nil
 }
 
-// Match returns the replacement for the first enabled rule whose keyword is
-// contained in message. Matching is plain substring containment, case-folded
+// Match returns the replacement for the first enabled rule that contains any of
+// its keywords in message. Matching is plain substring containment, case-folded
 // with strings.ToLower when the rule is case-insensitive, and it is not
 // recursive: the returned replacement is never matched again.
 func (m *Matcher) Match(message string) Result {
@@ -429,8 +485,10 @@ func (m *Matcher) Match(message string) Result {
 			continue
 		}
 		if rule.caseSensitive {
-			if strings.Contains(message, rule.keyword) {
-				return Result{Message: rule.replacement, Matched: true, RuleID: rule.id}
+			for _, keyword := range rule.keywords {
+				if strings.Contains(message, keyword.keyword) {
+					return Result{Message: rule.replacement, Matched: true, RuleID: rule.id}
+				}
 			}
 			continue
 		}
@@ -438,8 +496,10 @@ func (m *Matcher) Match(message string) Result {
 			lower = strings.ToLower(message)
 			lowerReady = true
 		}
-		if strings.Contains(lower, rule.lowerKeyword) {
-			return Result{Message: rule.replacement, Matched: true, RuleID: rule.id}
+		for _, keyword := range rule.keywords {
+			if strings.Contains(lower, keyword.lowerKeyword) {
+				return Result{Message: rule.replacement, Matched: true, RuleID: rule.id}
+			}
 		}
 	}
 	return Result{Message: message}

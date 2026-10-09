@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const errorMappingTestConfig = `{"enabled":true,"rules":[{"id":"reasoning-format","name":"format","enabled":true,"keyword":"reasoning_content","case_sensitive":false,"replacement":"当前请求格式与模型不兼容，请调整后重试。"}]}`
+const errorMappingTestConfig = `{"enabled":true,"rules":[{"id":"reasoning-format","name":"format","enabled":true,"keywords":["reasoning_content"],"case_sensitive":false,"replacement":"当前请求格式与模型不兼容，请调整后重试。"}]}`
 
 // setupErrorMessageMappingTest provisions an isolated SQLite database and
 // installs an enabled rule set. It restores the disabled default before the
@@ -100,11 +100,14 @@ func TestErrorMessageMappingConfigStrictnessAndMatching(t *testing.T) {
 		`{"enabled":true,"rules":null}`,
 		`{"enabled":null,"rules":[]}`,
 		`{"enabled":true,"rules":{}}`,
-		`{"enabled":true,"rules":[{"id":"a","name":"","enabled":true,"keyword":"k","case_sensitive":false,"replacement":"r","extra":1}]}`,
-		`{"enabled":true,"rules":[{"id":"a","enabled":true,"keyword":"k","case_sensitive":false,"replacement":"r"},{"id":"a","enabled":true,"keyword":"k2","case_sensitive":false,"replacement":"r2"}]}`,
-		`{"enabled":true,"rules":[{"id":"a","enabled":true,"keyword":"   ","case_sensitive":false,"replacement":"r"}]}`,
-		`{"enabled":true,"rules":[{"id":"a","enabled":true,"keyword":"k","case_sensitive":false,"replacement":"   "}]}`,
-		`{"enabled":true,"rules":[{"id":"bad id","enabled":true,"keyword":"k","case_sensitive":false,"replacement":"r"}]}`,
+		`{"enabled":true,"rules":[{"id":"a","name":"","enabled":true,"keywords":["k"],"case_sensitive":false,"replacement":"r","extra":1}]}`,
+		`{"enabled":true,"rules":[{"id":"a","enabled":true,"keywords":["k"],"case_sensitive":false,"replacement":"r"},{"id":"a","enabled":true,"keywords":["k2"],"case_sensitive":false,"replacement":"r2"}]}`,
+		`{"enabled":true,"rules":[{"id":"a","enabled":true,"keywords":["   "],"case_sensitive":false,"replacement":"r"}]}`,
+		`{"enabled":true,"rules":[{"id":"a","enabled":true,"keywords":[],"case_sensitive":false,"replacement":"r"}]}`,
+		`{"enabled":true,"rules":[{"id":"a","enabled":true,"keywords":"k","case_sensitive":false,"replacement":"r"}]}`,
+		`{"enabled":true,"rules":[{"id":"a","enabled":true,"keywords":[1],"case_sensitive":false,"replacement":"r"}]}`,
+		`{"enabled":true,"rules":[{"id":"a","enabled":true,"keywords":["k"],"case_sensitive":false,"replacement":"   "}]}`,
+		`{"enabled":true,"rules":[{"id":"bad id","enabled":true,"keywords":["k"],"case_sensitive":false,"replacement":"r"}]}`,
 		`{"enabled":true,"rules":[]} trailing`,
 	}
 	for _, raw := range invalid {
@@ -113,28 +116,36 @@ func TestErrorMessageMappingConfigStrictnessAndMatching(t *testing.T) {
 	}
 
 	longKeyword := strings.Repeat("a", error_mapping.MaxKeywordLength+1)
-	_, err := error_mapping.ParseConfig([]byte(`{"enabled":true,"rules":[{"id":"a","enabled":true,"keyword":"` + longKeyword + `","case_sensitive":false,"replacement":"r"}]}`))
+	_, err := error_mapping.ParseConfig([]byte(`{"enabled":true,"rules":[{"id":"a","enabled":true,"keywords":["` + longKeyword + `"],"case_sensitive":false,"replacement":"r"}]}`))
 	require.Error(t, err)
 	longReplacement := strings.Repeat("b", error_mapping.MaxReplacementLength+1)
-	_, err = error_mapping.ParseConfig([]byte(`{"enabled":true,"rules":[{"id":"a","enabled":true,"keyword":"k","case_sensitive":false,"replacement":"` + longReplacement + `"}]}`))
+	_, err = error_mapping.ParseConfig([]byte(`{"enabled":true,"rules":[{"id":"a","enabled":true,"keywords":["k"],"case_sensitive":false,"replacement":"` + longReplacement + `"}]}`))
 	require.Error(t, err)
 
 	cfg, err := error_mapping.ParseConfig([]byte(`{"enabled":true,"rules":[` +
-		`{"id":"first","name":"First","enabled":true,"keyword":"ALPHA","case_sensitive":false,"replacement":"替换甲"},` +
-		`{"id":"third","name":"Third","enabled":true,"keyword":"中文关键词","case_sensitive":false,"replacement":"中文替换"}]}`))
+		`{"id":"first","name":"First","enabled":true,"keywords":["ALPHA","BETA"],"case_sensitive":false,"replacement":"替换甲"},` +
+		`{"id":"third","name":"Third","enabled":true,"keywords":["中文关键词"],"case_sensitive":false,"replacement":"中文替换"}]}`))
 	require.NoError(t, err)
+	require.Equal(t, []string{"ALPHA", "BETA"}, cfg.Rules[0].Keywords, "a keywords array must keep its entries and order")
+
+	// A legacy single "keyword" still parses and migrates to a one-element list.
+	legacy, err := error_mapping.ParseConfig([]byte(`{"enabled":true,"rules":[{"id":"legacy","enabled":true,"keyword":"old-keyword","case_sensitive":false,"replacement":"r"}]}`))
+	require.NoError(t, err)
+	require.Equal(t, []string{"old-keyword"}, legacy.Rules[0].Keywords)
+
 	matcher, err := error_mapping.Compile(cfg)
 	require.NoError(t, err)
 
 	require.Equal(t, error_mapping.Result{Message: "替换甲", Matched: true, RuleID: "first"}, matcher.Match("see ALPHA here"))
 	require.Equal(t, error_mapping.Result{Message: "替换甲", Matched: true, RuleID: "first"}, matcher.Match("see alpha here"))
+	require.Equal(t, error_mapping.Result{Message: "替换甲", Matched: true, RuleID: "first"}, matcher.Match("see beta here"))
 	require.Equal(t, error_mapping.Result{Message: "中文替换", Matched: true, RuleID: "third"}, matcher.Match("出现中文关键词了"))
 	require.False(t, matcher.Match("no keyword here").Matched)
 	require.Equal(t, "no keyword here", matcher.Match("no keyword here").Message)
 
 	// Case-sensitive rules compare the raw bytes.
 	caseSensitive, err := error_mapping.Compile(error_mapping.Config{Enabled: true, Rules: []error_mapping.Rule{
-		{ID: "cs", Enabled: true, Keyword: "Alpha", CaseSensitive: true, Replacement: "CS"},
+		{ID: "cs", Enabled: true, Keywords: []string{"Alpha"}, CaseSensitive: true, Replacement: "CS"},
 	}})
 	require.NoError(t, err)
 	require.False(t, caseSensitive.Match("alpha").Matched)
@@ -145,15 +156,15 @@ func TestErrorMessageMappingConfigStrictnessAndMatching(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, disabled.Match("see ALPHA here").Matched)
 	ruleOff, err := error_mapping.Compile(error_mapping.Config{Enabled: true, Rules: []error_mapping.Rule{
-		{ID: "off", Enabled: false, Keyword: "alpha", Replacement: "X"},
+		{ID: "off", Enabled: false, Keywords: []string{"alpha"}, Replacement: "X"},
 	}})
 	require.NoError(t, err)
 	require.False(t, ruleOff.Match("alpha").Matched)
 
 	// The first match wins and the replacement is not matched again.
 	chain, err := error_mapping.Compile(error_mapping.Config{Enabled: true, Rules: []error_mapping.Rule{
-		{ID: "a", Enabled: true, Keyword: "alpha", Replacement: "beta"},
-		{ID: "b", Enabled: true, Keyword: "beta", Replacement: "gamma"},
+		{ID: "a", Enabled: true, Keywords: []string{"alpha"}, Replacement: "beta"},
+		{ID: "b", Enabled: true, Keywords: []string{"beta"}, Replacement: "gamma"},
 	}})
 	require.NoError(t, err)
 	require.Equal(t, "beta", chain.Match("alpha").Message)

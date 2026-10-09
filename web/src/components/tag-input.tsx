@@ -30,6 +30,14 @@ interface TagInputProps {
   placeholder?: string
   className?: string
   disabled?: boolean
+  /** Forwarded to the inner text input for label association. */
+  id?: string
+  /** Accessible name for the inner text input when no visible label targets it. */
+  ariaLabel?: string
+  /** Marks the control invalid; forwarded to the inner text input. */
+  ariaInvalid?: boolean
+  /** Points the inner text input at help/error text. */
+  ariaDescribedBy?: string
 }
 
 export function TagInput({
@@ -38,6 +46,10 @@ export function TagInput({
   placeholder,
   className,
   disabled = false,
+  id,
+  ariaLabel,
+  ariaInvalid,
+  ariaDescribedBy,
 }: TagInputProps) {
   const { t } = useTranslation()
   const placeholderText = placeholder ?? t('Add tags...')
@@ -61,7 +73,7 @@ export function TagInput({
       e.preventDefault()
       addTag(inputValue)
     } else if (e.key === 'Backspace' && !inputValue && value.length > 0) {
-      removeTag(value[value.length - 1])
+      removeTag(value.at(-1) ?? '')
     }
   }
 
@@ -80,8 +92,14 @@ export function TagInput({
       onClick={() => inputRef.current?.focus()}
     >
       {value.map((tag) => (
-        <Badge key={tag} variant='secondary' className='gap-1 pr-1'>
-          {tag}
+        <Badge
+          key={tag}
+          variant='secondary'
+          className='max-w-full min-w-0 gap-1 pr-1'
+        >
+          <span className='min-w-0 truncate' title={tag}>
+            {tag}
+          </span>
           {!disabled && (
             <Button
               type='button'
@@ -101,6 +119,7 @@ export function TagInput({
       ))}
       <input
         ref={inputRef}
+        id={id}
         type='text'
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
@@ -108,6 +127,9 @@ export function TagInput({
         onBlur={handleBlur}
         placeholder={value.length === 0 ? placeholderText : ''}
         disabled={disabled}
+        aria-label={ariaLabel}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
         className='placeholder:text-muted-foreground min-w-[120px] flex-1 border-0 bg-transparent shadow-none outline-none focus-visible:ring-0'
       />
     </div>
