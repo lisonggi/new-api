@@ -81,8 +81,6 @@ func InitOptionMap() {
 	common.OptionMap["About"] = ""
 	common.OptionMap["HomePageContent"] = ""
 	common.OptionMap["Footer"] = common.Footer
-	common.OptionMap["SystemName"] = common.SystemName
-	common.OptionMap["Logo"] = common.Logo
 	common.OptionMap["ServerAddress"] = ""
 	common.OptionMap["TaskPublicAddress"] = system_setting.TaskPublicAddress
 	common.OptionMap["WorkerUrl"] = system_setting.WorkerUrl
@@ -402,7 +400,10 @@ func updateOptionMap(key string, value string) (err error) {
 		// option value and snapshot together under their own mutex.
 		return nil
 	}
-	if key == retiredThemeOptionKey {
+	if key == retiredThemeOptionKey || key == "SystemName" || key == "Logo" {
+		// Branding (SystemName/Logo) is fixed at build time; the retired theme
+		// option is likewise dropped. Delete any stale value so the option map —
+		// and therefore the admin option API — never exposes or maintains them.
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)
 		common.OptionMapRWMutex.Unlock()
@@ -646,10 +647,6 @@ func updateOptionMap(key string, value string) (err error) {
 		common.LinuxDOMinimumTrustLevel, _ = strconv.Atoi(value)
 	case "Footer":
 		common.Footer = value
-	case "SystemName":
-		common.SystemName = value
-	case "Logo":
-		common.Logo = value
 	case "WeChatServerAddress":
 		common.WeChatServerAddress = value
 	case "WeChatServerToken":
