@@ -25,7 +25,7 @@ export const DEFAULT_SYSTEM_NAME = 'iioooo'
 export const DEFAULT_LOGO = '/iioooo.logo.svg'
 // Browser tab title and `meta[name="title"]`. Derived from the brand constant so
 // they stay in sync; the header brand keeps using `DEFAULT_SYSTEM_NAME`.
-export const DEFAULT_SITE_TITLE = `${DEFAULT_SYSTEM_NAME} - AI API 网关与中转平台`
+export const DEFAULT_SITE_TITLE = `${DEFAULT_SYSTEM_NAME} - 新一代 AI 大模型 API 中转平台`
 
 // LocalStorage Keys
 export const STORAGE_KEYS = {
