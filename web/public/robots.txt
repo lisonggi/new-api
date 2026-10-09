@@ -1,0 +1,57 @@
+# robots.txt for https://io.iioooo.com/
+User-agent: *
+Allow: /
+
+# Account / console pages (require sign-in)
+Disallow: /dashboard
+Disallow: /keys
+Disallow: /wallet
+Disallow: /profile
+Disallow: /security
+Disallow: /subscriptions
+Disallow: /redemption-codes
+Disallow: /usage-logs
+Disallow: /task-plugins
+Disallow: /playground
+Disallow: /chat2link
+Disallow: /chat/
+Disallow: /models
+Disallow: /channels
+Disallow: /users
+Disallow: /system-info
+Disallow: /system-settings
+
+# Admin setup
+Disallow: /setup
+
+# Auth flows
+Disallow: /sign-in
+Disallow: /sign-up
+Disallow: /register
+Disallow: /reset
+Disallow: /forgot-password
+Disallow: /otp
+Disallow: /oauth
+Disallow: /user/
+
+# API and relay endpoints
+Disallow: /api/
+Disallow: /v1/
+Disallow: /v1beta/
+Disallow: /pg/
+Disallow: /mj/
+Disallow: /suno/
+Disallow: /claude/
+Disallow: /gemini/
+Disallow: /openai/
+Disallow: /backend-api/
+
+# Error routes
+Disallow: /401
+Disallow: /403
+Disallow: /404
+Disallow: /500
+Disallow: /503
+Disallow: /errors/
+
+Sitemap: https://io.iioooo.com/sitemap.xml

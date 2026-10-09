@@ -17,19 +17,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /**
- * Application-wide constants
+ * Point the document's canonical link at `href`, creating the tag on first use.
+ *
+ * The SPA serves the same HTML document for every route, so a canonical URL
+ * cannot be baked into `index.html`: a static value would advertise the landing
+ * page as canonical for every page. Callers pass an absolute, query-less URL.
  */
-
-// System Configuration Defaults
-export const DEFAULT_SYSTEM_NAME = 'iioooo'
-export const DEFAULT_LOGO = '/iioooo.logo.svg'
-// Browser tab title and `meta[name="title"]`. Derived from the brand constant so
-// they stay in sync; the header brand keeps using `DEFAULT_SYSTEM_NAME`.
-export const DEFAULT_SITE_TITLE = `${DEFAULT_SYSTEM_NAME} - AI API 网关与中转平台`
-
-// LocalStorage Keys
-export const STORAGE_KEYS = {
-  SYSTEM_NAME: 'system_name',
-  LOGO: 'logo',
-  FOOTER_HTML: 'footer_html',
-} as const
+export function syncCanonicalLink(href: string): void {
+  if (typeof document === 'undefined') return
+  let link = document.querySelector<HTMLLinkElement>('link[rel="canonical"]')
+  if (!link) {
+    link = document.createElement('link')
+    link.rel = 'canonical'
+    document.head.appendChild(link)
+  }
+  if (link.getAttribute('href') !== href) {
+    link.setAttribute('href', href)
+  }
+}

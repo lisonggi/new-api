@@ -22,7 +22,7 @@ import { StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 
 import { installBuildMetadata } from '@/lib/build-metadata'
-import { DEFAULT_LOGO, DEFAULT_SYSTEM_NAME } from '@/lib/constants'
+import { DEFAULT_LOGO, DEFAULT_SITE_TITLE } from '@/lib/constants'
 import { applyFaviconToDom } from '@/lib/dom-utils'
 import '@/lib/dayjs'
 import { initializeFrontendCache } from '@/lib/frontend-cache'
@@ -68,17 +68,18 @@ const rootElement = document.querySelector<HTMLElement>('#root')
 if (!rootElement) {
   throw new Error('Root element not found')
 }
-// Branding is constant, so apply it before React mounts instead of waiting for
-// `/api/status`: the tab title and the favicon are then stable from the first
-// frame and neither can flash while the request is in flight.
+// Branding and the site title are constant, so apply them before React mounts
+// instead of waiting for `/api/status`: the tab title and the favicon are then
+// stable from the first frame and neither can flash while the request is in
+// flight.
 ;(function initSystemBranding() {
   try {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
-    document.title = DEFAULT_SYSTEM_NAME
+    document.title = DEFAULT_SITE_TITLE
     const metaTitle = document.querySelector(
       'meta[name="title"]'
     ) as HTMLMetaElement | null
-    if (metaTitle) metaTitle.setAttribute('content', DEFAULT_SYSTEM_NAME)
+    if (metaTitle) metaTitle.setAttribute('content', DEFAULT_SITE_TITLE)
     applyFaviconToDom(DEFAULT_LOGO)
   } catch {
     /* empty */
