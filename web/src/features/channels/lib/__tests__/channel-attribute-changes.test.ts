@@ -80,6 +80,7 @@ test('model mapping and groups carry their replace/merge mode', () => {
 test('channel settings are only built when enabled', () => {
   const changes = emptyChannelAttributeChanges()
   changes.settings.reasoningContentBackfill = { enabled: true, value: true }
+  changes.settings.assistantContentBackfill = { enabled: true, value: true }
   changes.settings.systemPrompt = { enabled: true, value: 'be nice' }
   changes.settings.modelFirstResponseTimeout = {
     enabled: true,
@@ -89,6 +90,7 @@ test('channel settings are only built when enabled', () => {
   expect(buildChannelAttributeParams(changes)).toEqual({
     settings: {
       reasoning_content_backfill: true,
+      assistant_content_backfill: true,
       system_prompt: 'be nice',
       model_first_response_timeout: {
         'gpt-4o': [{ context_tokens: 1000, timeout_ms: 500 }],

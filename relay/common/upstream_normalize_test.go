@@ -38,6 +38,14 @@ func relayInfoForResponsesBackfill(backfill bool) *RelayInfo {
 	}
 }
 
+func relayInfoForAssistantContentBackfill(backfill bool) *RelayInfo {
+	return &RelayInfo{
+		ChannelMeta: &ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{AssistantContentBackfill: backfill},
+		},
+	}
+}
+
 func TestNormalizeUpstreamRequestChatBackfill(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -210,6 +218,114 @@ func TestNormalizeUpstreamRequestBackfillIsOptIn(t *testing.T) {
 	// Enabled: each switch applies to its own protocol shape.
 	assert.Contains(t, string(NormalizeUpstreamRequest([]byte(chatInput), relayInfoForBackfill("", "", true))), `"reasoning_content":""`)
 	assert.Contains(t, string(NormalizeUpstreamRequest([]byte(responsesInput), relayInfoForResponsesBackfill(true))), `"reasoning_content":""`)
+}
+
+func TestNormalizeUpstreamRequestAssistantContentBackfill(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{
+			name:   "leaves a user-only body untouched",
+			input:  `{"messages":[{"role":"user","content":"hi"}]}`,
+			expect: `{"messages":[{"role":"user","content":"hi"}]}`,
+		},
+		{
+			name:   "fills missing content on a reasoning-only assistant turn",
+			input:  `{"messages":[{"role":"assistant","reasoning_content":"x"}]}`,
+			expect: `{"messages":[{"role":"assistant","reasoning_content":"x","content":""}]}`,
+		},
+		{
+			name:   "replaces null content",
+			input:  `{"messages":[{"role":"assistant","content":null}]}`,
+			expect: `{"messages":[{"role":"assistant","content":""}]}`,
+		},
+		{
+			name:   "keeps null content when a tool call is present",
+			input:  `{"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c1"}]}]}`,
+			expect: `{"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c1"}]}]}`,
+		},
+		{
+			name:   "keeps null content when a legacy function_call is present",
+			input:  `{"messages":[{"role":"assistant","content":null,"function_call":{"name":"calc","arguments":"{}"}}]}`,
+			expect: `{"messages":[{"role":"assistant","content":null,"function_call":{"name":"calc","arguments":"{}"}}]}`,
+		},
+		{
+			name:   "keeps a multimodal content array",
+			input:  `{"messages":[{"role":"assistant","content":[{"type":"text","text":"x"}]}]}`,
+			expect: `{"messages":[{"role":"assistant","content":[{"type":"text","text":"x"}]}]}`,
+		},
+		{
+			name:   "keeps an explicit empty string",
+			input:  `{"messages":[{"role":"assistant","content":""}]}`,
+			expect: `{"messages":[{"role":"assistant","content":""}]}`,
+		},
+		{
+			name:   "keeps real content",
+			input:  `{"messages":[{"role":"assistant","content":"real"}]}`,
+			expect: `{"messages":[{"role":"assistant","content":"real"}]}`,
+		},
+		{
+			name:   "ignores an empty tool_calls array",
+			input:  `{"messages":[{"role":"assistant","content":null,"tool_calls":[]}]}`,
+			expect: `{"messages":[{"role":"assistant","content":"","tool_calls":[]}]}`,
+		},
+		{
+			name:   "touches only the qualifying assistant turn",
+			input:  `{"messages":[{"role":"user","content":"go"},{"role":"assistant","content":"a"},{"role":"assistant","reasoning_content":"x"},{"role":"tool","content":"1"}]}`,
+			expect: `{"messages":[{"role":"user","content":"go"},{"role":"assistant","content":"a"},{"role":"assistant","reasoning_content":"x","content":""},{"role":"tool","content":"1"}]}`,
+		},
+		{
+			name:   "leaves a body without messages untouched",
+			input:  `{"model":"deepseek-v4.1-flash","prompt":"hi"}`,
+			expect: `{"model":"deepseek-v4.1-flash","prompt":"hi"}`,
+		},
+		{
+			name:   "leaves invalid json untouched",
+			input:  `{"messages":[`,
+			expect: `{"messages":[`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeUpstreamRequest([]byte(tt.input), relayInfoForAssistantContentBackfill(true))
+			assert.Equal(t, tt.expect, string(got))
+		})
+	}
+}
+
+func TestNormalizeUpstreamRequestAssistantContentBackfillIsOptIn(t *testing.T) {
+	input := `{"messages":[{"role":"assistant","content":null}]}`
+
+	// Default (off) and a nil info leave the request unchanged (opt-in contract).
+	assert.Equal(t, input, string(NormalizeUpstreamRequest([]byte(input), relayInfoForAssistantContentBackfill(false))))
+	assert.Equal(t, input, string(NormalizeUpstreamRequest([]byte(input), nil)))
+
+	// Enabled: the empty content is written.
+	assert.Equal(t, `{"messages":[{"role":"assistant","content":""}]}`,
+		string(NormalizeUpstreamRequest([]byte(input), relayInfoForAssistantContentBackfill(true))))
+}
+
+func TestNormalizeUpstreamRequestAssistantContentBackfillIsIndependent(t *testing.T) {
+	// Only the reasoning switch on: a no-tool assistant turn keeps its null content.
+	noToolTurn := `{"messages":[{"role":"assistant","content":null}]}`
+	assert.Equal(t, noToolTurn, string(NormalizeUpstreamRequest([]byte(noToolTurn), relayInfoForBackfill("", "", true))))
+
+	// Only the content switch on: a tool-call assistant turn is untouched.
+	toolTurn := `{"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c1"}]}]}`
+	assert.Equal(t, toolTurn, string(NormalizeUpstreamRequest([]byte(toolTurn), relayInfoForAssistantContentBackfill(true))))
+
+	// Both on: each rule fills its own disjoint set.
+	both := `{"messages":[{"role":"assistant","content":null},{"role":"assistant","content":null,"tool_calls":[{"id":"c1"}]}]}`
+	info := &RelayInfo{ChannelMeta: &ChannelMeta{ChannelSetting: dto.ChannelSettings{
+		ReasoningContentBackfill: true,
+		AssistantContentBackfill: true,
+	}}}
+	got := string(NormalizeUpstreamRequest([]byte(both), info))
+	assert.Contains(t, got, `{"role":"assistant","content":""}`)
+	assert.Contains(t, got, `"reasoning_content":""`)
 }
 
 func TestNormalizeUpstreamRequestChatAndResponsesTogglesAreIndependent(t *testing.T) {

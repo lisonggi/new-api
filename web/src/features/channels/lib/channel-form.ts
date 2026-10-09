@@ -342,6 +342,7 @@ export const channelFormSchema = z
     thinking_to_content: z.boolean().optional(),
     reasoning_content_backfill: z.boolean().optional(),
     responses_reasoning_content_backfill: z.boolean().optional(),
+    assistant_content_backfill: z.boolean().optional(),
     ignore_response_model_mismatch: z.boolean().optional(),
     model_first_response_timeout: z
       .string()
@@ -553,6 +554,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   thinking_to_content: false,
   reasoning_content_backfill: false,
   responses_reasoning_content_backfill: false,
+  assistant_content_backfill: false,
   ignore_response_model_mismatch: false,
   model_first_response_timeout: '',
   error_retry_policy: '',
@@ -602,6 +604,7 @@ export function transformChannelToFormDefaults(
     thinking_to_content: false,
     reasoning_content_backfill: false,
     responses_reasoning_content_backfill: false,
+    assistant_content_backfill: false,
     ignore_response_model_mismatch: false,
     model_first_response_timeout: '',
     error_retry_policy: '',
@@ -633,6 +636,7 @@ export function transformChannelToFormDefaults(
         reasoning_content_backfill: parsed.reasoning_content_backfill === true,
         responses_reasoning_content_backfill:
           parsed.responses_reasoning_content_backfill === true,
+        assistant_content_backfill: parsed.assistant_content_backfill === true,
         ignore_response_model_mismatch:
           parsed.ignore_response_model_mismatch === true,
         model_first_response_timeout:
@@ -780,6 +784,7 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     reasoning_content_backfill: formData.reasoning_content_backfill === true,
     responses_reasoning_content_backfill:
       formData.responses_reasoning_content_backfill === true,
+    assistant_content_backfill: formData.assistant_content_backfill === true,
     ignore_response_model_mismatch:
       formData.ignore_response_model_mismatch === true,
     model_first_response_timeout: parseModelFirstResponseTimeout(

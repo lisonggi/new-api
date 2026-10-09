@@ -89,6 +89,7 @@ export interface ChannelSettings {
   thinking_to_content?: boolean
   reasoning_content_backfill?: boolean
   responses_reasoning_content_backfill?: boolean
+  assistant_content_backfill?: boolean
   ignore_response_model_mismatch?: boolean
   model_first_response_timeout?: Record<
     string,

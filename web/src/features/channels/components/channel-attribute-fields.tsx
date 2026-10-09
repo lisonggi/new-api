@@ -479,6 +479,23 @@ export function ChannelAttributeFields(props: ChannelAttributeFieldsProps) {
         />
 
         <BoolSettingRow
+          id='assistant-content-backfill'
+          label={t('Assistant content backfill')}
+          description={t(
+            'Backfill missing content on assistant messages that replay no tool call in Chat Completions. Fills only an empty string and is skipped when body passthrough is enabled.'
+          )}
+          enabled={settings.assistantContentBackfill.enabled}
+          onEnabledChange={(value) =>
+            setSetting('assistantContentBackfill', { enabled: value })
+          }
+          value={settings.assistantContentBackfill.value}
+          onValueChange={(value) =>
+            setSetting('assistantContentBackfill', { value })
+          }
+          disabled={disabled}
+        />
+
+        <BoolSettingRow
           id='ignore-response-model-mismatch'
           label={t('Ignore response model mismatch')}
           description={t(

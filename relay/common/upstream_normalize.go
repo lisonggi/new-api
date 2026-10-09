@@ -13,22 +13,26 @@ import (
 // Each protocol shape is gated by its own opt-in channel switch:
 //   - ReasoningContentBackfill targets a Chat Completions messages array.
 //   - ResponsesReasoningContentBackfill targets a Responses input array.
+//   - AssistantContentBackfill targets a Chat Completions messages array.
 //
 // Thinking-mode upstreams reject a replayed assistant turn whose message or
 // input item carries no reasoning_content. The fix fills a missing or null
 // reasoning_content with an empty string; a value supplied by the converter or
-// client is never overwritten. Bodies that match neither shape are returned
-// unchanged.
+// client is never overwritten. Separately, an upstream that requires an
+// assistant turn to carry content or a tool call rejects a turn with neither;
+// AssistantContentBackfill fills that missing or null content with an empty
+// string. Bodies that match no enabled shape are returned unchanged.
 func NormalizeUpstreamRequest(jsonData []byte, info *RelayInfo) []byte {
 	// The backfills are opt-in per channel. A nil info or channel meta, or a
-	// channel that enabled neither switch, is the common case (default off), so
-	// return before parsing the body at all.
+	// channel that enabled none of the switches, is the common case (default
+	// off), so return before parsing the body at all.
 	if info == nil || info.ChannelMeta == nil {
 		return jsonData
 	}
 	backfillChat := info.ChannelSetting.ReasoningContentBackfill
 	backfillResponses := info.ChannelSetting.ResponsesReasoningContentBackfill
-	if !backfillChat && !backfillResponses {
+	backfillContent := info.ChannelSetting.AssistantContentBackfill
+	if !backfillChat && !backfillResponses && !backfillContent {
 		return jsonData
 	}
 	if len(jsonData) == 0 || !gjson.ValidBytes(jsonData) {
@@ -41,7 +45,52 @@ func NormalizeUpstreamRequest(jsonData []byte, info *RelayInfo) []byte {
 	if backfillResponses {
 		jsonData = backfillAssistantReasoningContent(jsonData, "input", false)
 	}
+	if backfillContent {
+		// The complementary set: assistant turns that replay no tool call.
+		jsonData = backfillAssistantContent(jsonData)
+	}
 	return jsonData
+}
+
+// backfillAssistantContent fills a missing or null content on assistant turns in
+// a Chat Completions messages array. An upstream may reject a replayed
+// assistant turn that carries neither content nor a tool call ("Invalid
+// assistant message: content or tool_calls must be set"); an empty string
+// satisfies that check while preserving the turn. It walks the array
+// structurally and rewrites only the missing key, so every other field and byte
+// ordering is preserved.
+//
+// A turn that replays a tool call (a non-empty tool_calls array or the legacy
+// function_call) already satisfies the upstream check and keeps its null
+// content. A turn whose content is already present is left untouched,
+// including an explicit empty string and a multimodal parts array. A body
+// without a messages array yields an unmodified body.
+func backfillAssistantContent(jsonData []byte) []byte {
+	messages := gjson.GetBytes(jsonData, "messages")
+	if !messages.IsArray() {
+		return jsonData
+	}
+	result := jsonData
+	messages.ForEach(func(index, turn gjson.Result) bool {
+		if turn.Get("role").String() != "assistant" {
+			return true
+		}
+		if toolCalls := turn.Get("tool_calls"); toolCalls.IsArray() && len(toolCalls.Array()) > 0 {
+			return true
+		}
+		if functionCall := turn.Get("function_call"); functionCall.Exists() && functionCall.Type != gjson.Null {
+			return true
+		}
+		content := turn.Get("content")
+		if content.Exists() && content.Type != gjson.Null {
+			return true
+		}
+		if updated, err := sjson.SetBytes(result, "messages."+index.String()+".content", ""); err == nil {
+			result = updated
+		}
+		return true
+	})
+	return result
 }
 
 // backfillAssistantReasoningContent fills a missing or null reasoning_content on

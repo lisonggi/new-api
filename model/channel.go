@@ -946,6 +946,7 @@ type ChannelBatchFields struct {
 type ChannelBatchSettings struct {
 	ReasoningContentBackfill          *bool
 	ResponsesReasoningContentBackfill *bool
+	AssistantContentBackfill          *bool
 	IgnoreResponseModelMismatch       *bool
 	ThinkingToContent                 *bool
 	SystemPrompt                      *string
@@ -969,6 +970,7 @@ func (s *ChannelBatchSettings) isEmpty() bool {
 	}
 	return s.ReasoningContentBackfill == nil &&
 		s.ResponsesReasoningContentBackfill == nil &&
+		s.AssistantContentBackfill == nil &&
 		s.IgnoreResponseModelMismatch == nil &&
 		s.ThinkingToContent == nil &&
 		s.SystemPrompt == nil &&
@@ -1138,6 +1140,9 @@ func patchChannelBatchSettings(ids []int, f ChannelBatchFields) error {
 			}
 			if patch.ResponsesReasoningContentBackfill != nil {
 				setting.ResponsesReasoningContentBackfill = *patch.ResponsesReasoningContentBackfill
+			}
+			if patch.AssistantContentBackfill != nil {
+				setting.AssistantContentBackfill = *patch.AssistantContentBackfill
 			}
 			if patch.IgnoreResponseModelMismatch != nil {
 				setting.IgnoreResponseModelMismatch = *patch.IgnoreResponseModelMismatch

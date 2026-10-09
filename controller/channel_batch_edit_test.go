@@ -93,7 +93,7 @@ func TestEditChannelBatchRejectsInvalidPayloads(t *testing.T) {
 func TestEditChannelBatchSettingsRequiresSensitiveWrite(t *testing.T) {
 	setupChannelBatchEditTest(t)
 	channel := seedBatchEditChannel(t, model.DB)
-	settingsBody := fmt.Sprintf(`{"ids":[%d],"settings":{"system_prompt":"hi"}}`, channel.Id)
+	settingsBody := fmt.Sprintf(`{"ids":[%d],"settings":{"system_prompt":"hi","assistant_content_backfill":true}}`, channel.Id)
 
 	// An admin holds ChannelWrite but not ChannelSensitiveWrite.
 	denied := callChannelBatchHandler(t, EditChannelBatch, 2, common.RoleAdminUser, settingsBody)
@@ -109,7 +109,9 @@ func TestEditChannelBatchSettingsRequiresSensitiveWrite(t *testing.T) {
 	assert.Contains(t, granted.Body.String(), `"success":true`)
 	var reloaded model.Channel
 	require.NoError(t, model.DB.First(&reloaded, channel.Id).Error)
-	assert.Equal(t, "hi", reloaded.GetSetting().SystemPrompt)
+	setting := reloaded.GetSetting()
+	assert.Equal(t, "hi", setting.SystemPrompt)
+	assert.True(t, setting.AssistantContentBackfill)
 }
 
 func TestEditTagChannelsSettingsRequiresSensitiveWrite(t *testing.T) {
@@ -117,7 +119,7 @@ func TestEditTagChannelsSettingsRequiresSensitiveWrite(t *testing.T) {
 	channel := seedBatchEditChannel(t, model.DB)
 	tag := "batch-tag"
 	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channel.Id).Update("tag", tag).Error)
-	body := `{"tag":"batch-tag","settings":{"thinking_to_content":true}}`
+	body := `{"tag":"batch-tag","settings":{"thinking_to_content":true,"assistant_content_backfill":true}}`
 
 	denied := callChannelBatchHandler(t, EditTagChannels, 2, common.RoleAdminUser, body)
 	assert.Contains(t, denied.Body.String(), `"success":false`)
@@ -126,5 +128,7 @@ func TestEditTagChannelsSettingsRequiresSensitiveWrite(t *testing.T) {
 	assert.Contains(t, granted.Body.String(), `"success":true`)
 	var reloaded model.Channel
 	require.NoError(t, model.DB.First(&reloaded, channel.Id).Error)
-	assert.True(t, reloaded.GetSetting().ThinkingToContent)
+	setting := reloaded.GetSetting()
+	assert.True(t, setting.ThinkingToContent)
+	assert.True(t, setting.AssistantContentBackfill)
 }

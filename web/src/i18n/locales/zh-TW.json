@@ -5877,6 +5877,8 @@
     "Thinking...": "思考中...",
     "Reasoning content backfill": "回填缺失的 reasoning_content",
     "Backfill missing reasoning_content on assistant tool-call messages in Chat Completions for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.": "為思考模式上游，在 Chat Completions 帶工具呼叫的 assistant 訊息上回填缺失的 reasoning_content。僅回填空字串，開啟請求體透傳時不生效。",
+    "Assistant content backfill": "助手 content 回填",
+    "Backfill missing content on assistant messages that replay no tool call in Chat Completions. Fills only an empty string and is skipped when body passthrough is enabled.": "為 Chat Completions 中未回放工具呼叫的 assistant 訊息補全缺失的 content。僅補空字串，且啟用請求體透傳時跳過。",
     "Responses reasoning content backfill": "回填缺失的 reasoning_content（Responses）",
     "Backfill missing reasoning_content on assistant items in a Responses input array for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.": "為思考模式上游，在 Responses input 陣列中的 assistant 項上回填缺失的 reasoning_content。僅回填空字串，開啟請求體透傳時不生效。",
     "Third-party": "第三方",

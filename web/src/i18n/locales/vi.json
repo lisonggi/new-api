@@ -5877,6 +5877,8 @@
     "Thinking...": "Đang suy nghĩ...",
     "Reasoning content backfill": "Điền lại reasoning_content",
     "Backfill missing reasoning_content on assistant tool-call messages in Chat Completions for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.": "Điền lại reasoning_content còn thiếu trên các tin nhắn assistant có lời gọi công cụ trong Chat Completions cho upstream chế độ suy nghĩ. Chỉ điền chuỗi rỗng và bị bỏ qua khi bật passthrough nội dung yêu cầu.",
+    "Assistant content backfill": "Điền lại content của assistant",
+    "Backfill missing content on assistant messages that replay no tool call in Chat Completions. Fills only an empty string and is skipped when body passthrough is enabled.": "Điền lại content bị thiếu trên các tin nhắn assistant không phát lại lệnh gọi công cụ trong Chat Completions. Chỉ điền chuỗi rỗng và bị bỏ qua khi bật chuyển tiếp nội dung.",
     "Responses reasoning content backfill": "Điền lại reasoning_content (Responses)",
     "Backfill missing reasoning_content on assistant items in a Responses input array for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.": "Điền lại reasoning_content còn thiếu trên các mục assistant trong mảng input Responses cho upstream chế độ suy nghĩ. Chỉ điền chuỗi rỗng và bị bỏ qua khi bật passthrough nội dung yêu cầu.",
     "Third-party": "Bên thứ ba",

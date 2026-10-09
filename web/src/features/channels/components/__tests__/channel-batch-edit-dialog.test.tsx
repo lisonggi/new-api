@@ -143,6 +143,23 @@ test('a channel setting is sent inside settings, never as a column', async () =>
   expect(payload).not.toHaveProperty('proxy')
 })
 
+test('the assistant content backfill setting is sent inside settings', async () => {
+  const user = userEvent.setup()
+  await openDialog([9])
+
+  await user.click(
+    screen.getByRole('switch', { name: 'Assistant content backfill' })
+  )
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+  await waitFor(() =>
+    expect(editChannelBatch).toHaveBeenCalledWith({
+      ids: [9],
+      settings: { assistant_content_backfill: true },
+    })
+  )
+})
+
 test('enabling an attribute without a value blocks the save', async () => {
   const user = userEvent.setup()
   await openDialog()

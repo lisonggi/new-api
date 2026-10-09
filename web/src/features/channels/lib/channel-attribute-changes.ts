@@ -38,6 +38,7 @@ export type ChannelAttributeTimeoutValue = Record<
 export type ChannelBatchSettingsChanges = {
   reasoningContentBackfill: { enabled: boolean; value: boolean }
   responsesReasoningContentBackfill: { enabled: boolean; value: boolean }
+  assistantContentBackfill: { enabled: boolean; value: boolean }
   ignoreResponseModelMismatch: { enabled: boolean; value: boolean }
   thinkingToContent: { enabled: boolean; value: boolean }
   systemPrompt: { enabled: boolean; value: string }
@@ -83,6 +84,7 @@ export type ChannelAttributeChanges = {
 export type ChannelAttributeSettingsParams = {
   reasoning_content_backfill?: boolean
   responses_reasoning_content_backfill?: boolean
+  assistant_content_backfill?: boolean
   ignore_response_model_mismatch?: boolean
   thinking_to_content?: boolean
   system_prompt?: string
@@ -118,6 +120,7 @@ export function emptyChannelAttributeChanges(): ChannelAttributeChanges {
     settings: {
       reasoningContentBackfill: { enabled: false, value: true },
       responsesReasoningContentBackfill: { enabled: false, value: true },
+      assistantContentBackfill: { enabled: false, value: true },
       ignoreResponseModelMismatch: { enabled: false, value: true },
       thinkingToContent: { enabled: false, value: true },
       systemPrompt: { enabled: false, value: '' },
@@ -224,6 +227,9 @@ export function buildChannelAttributeParams(
   if (s.responsesReasoningContentBackfill.enabled) {
     settings.responses_reasoning_content_backfill =
       s.responsesReasoningContentBackfill.value
+  }
+  if (s.assistantContentBackfill.enabled) {
+    settings.assistant_content_backfill = s.assistantContentBackfill.value
   }
   if (s.ignoreResponseModelMismatch.enabled) {
     settings.ignore_response_model_mismatch =

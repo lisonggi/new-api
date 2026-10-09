@@ -5877,6 +5877,8 @@
     "Thinking...": "思考中...",
     "Reasoning content backfill": "reasoning_content の補完",
     "Backfill missing reasoning_content on assistant tool-call messages in Chat Completions for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.": "思考モードのアップストリーム向けに、Chat Completions のツール呼び出し付き assistant メッセージの欠落した reasoning_content を補完します。空文字列のみ補完し、リクエストボディのパススルーが有効な場合は適用されません。",
+    "Assistant content backfill": "assistant の content 補完",
+    "Backfill missing content on assistant messages that replay no tool call in Chat Completions. Fills only an empty string and is skipped when body passthrough is enabled.": "Chat Completions でツール呼び出しを再生しない assistant メッセージの欠落した content を補完します。空文字のみを補い、本文パススルーが有効な場合はスキップされます。",
     "Responses reasoning content backfill": "reasoning_content の補完（Responses）",
     "Backfill missing reasoning_content on assistant items in a Responses input array for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.": "思考モードのアップストリーム向けに、Responses の input 配列内の assistant 項目の欠落した reasoning_content を補完します。空文字列のみ補完し、リクエストボディのパススルーが有効な場合は適用されません。",
     "Third-party": "サードパーティ",

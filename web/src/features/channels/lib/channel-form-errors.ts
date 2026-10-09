@@ -39,6 +39,7 @@ const ADVANCED_SETTINGS_FIELDS = new Set<FieldPath<ChannelFormValues>>([
   'thinking_to_content',
   'reasoning_content_backfill',
   'responses_reasoning_content_backfill',
+  'assistant_content_backfill',
   'ignore_response_model_mismatch',
   'model_first_response_timeout',
   'error_retry_policy',

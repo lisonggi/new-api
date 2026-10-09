@@ -149,3 +149,55 @@ describe('responses_reasoning_content_backfill channel setting', () => {
     ).toBe(false)
   })
 })
+
+describe('assistant_content_backfill channel setting', () => {
+  test('new channels default to assistant content backfill disabled', () => {
+    expect(CHANNEL_FORM_DEFAULT_VALUES.assistant_content_backfill).toBe(false)
+    expect(
+      JSON.parse(buildSettingJSON(CHANNEL_FORM_DEFAULT_VALUES))
+        .assistant_content_backfill
+    ).toBe(false)
+  })
+
+  test.each([undefined, false, true])(
+    'preserves setting %s through create, update and reload',
+    (enabled) => {
+      const channel = channelWithSetting(
+        JSON.stringify({ assistant_content_backfill: enabled })
+      )
+      const values = transformChannelToFormDefaults(channel)
+      const payloads = [
+        transformFormDataToCreatePayload(values).channel,
+        transformFormDataToUpdatePayload(values, channel.id),
+      ]
+      for (const payload of payloads) {
+        assert(typeof payload.setting === 'string')
+        expect(JSON.parse(payload.setting).assistant_content_backfill).toBe(
+          enabled === true
+        )
+        expect(
+          transformChannelToFormDefaults({
+            ...channel,
+            setting: payload.setting,
+          }).assistant_content_backfill
+        ).toBe(enabled === true)
+      }
+    }
+  )
+
+  test('coerces non-boolean values to false instead of leaking them into the form', () => {
+    const stringFalse = channelWithSetting(
+      JSON.stringify({ assistant_content_backfill: 'false' })
+    )
+    expect(
+      transformChannelToFormDefaults(stringFalse).assistant_content_backfill
+    ).toBe(false)
+
+    const numeric = channelWithSetting(
+      JSON.stringify({ assistant_content_backfill: 1 })
+    )
+    expect(
+      transformChannelToFormDefaults(numeric).assistant_content_backfill
+    ).toBe(false)
+  })
+})

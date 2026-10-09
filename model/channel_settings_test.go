@@ -828,6 +828,7 @@ func TestEditChannelByIDsBatchModesAndSettings(t *testing.T) {
 			// Settings patch: booleans, string, JSON config and retry policy in
 			// the "setting" column.
 			backfill := true
+			assistantContentBackfill := true
 			prompt := "be nice"
 			promptOverride := true
 			timeout := map[string][]dto.FirstResponseTimeoutTier{
@@ -841,6 +842,7 @@ func TestEditChannelByIDsBatchModesAndSettings(t *testing.T) {
 			}
 			require.NoError(t, EditChannelByIDs([]int{a}, ChannelBatchFields{Settings: &ChannelBatchSettings{
 				ReasoningContentBackfill:  &backfill,
+				AssistantContentBackfill:  &assistantContentBackfill,
 				SystemPrompt:              &prompt,
 				SystemPromptOverride:      &promptOverride,
 				ModelFirstResponseTimeout: &timeout,
@@ -849,6 +851,7 @@ func TestEditChannelByIDsBatchModesAndSettings(t *testing.T) {
 			require.NoError(t, db.First(&gotA, a).Error)
 			setting := gotA.GetSetting()
 			assert.True(t, setting.ReasoningContentBackfill)
+			assert.True(t, setting.AssistantContentBackfill)
 			assert.Equal(t, "be nice", setting.SystemPrompt)
 			assert.True(t, setting.SystemPromptOverride)
 			assert.Equal(t, timeout, setting.ModelFirstResponseTimeout)

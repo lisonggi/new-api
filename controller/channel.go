@@ -960,6 +960,7 @@ type ChannelBatchAttributes struct {
 type ChannelBatchSettingsRequest struct {
 	ReasoningContentBackfill          *bool                                     `json:"reasoning_content_backfill"`
 	ResponsesReasoningContentBackfill *bool                                     `json:"responses_reasoning_content_backfill"`
+	AssistantContentBackfill          *bool                                     `json:"assistant_content_backfill"`
 	IgnoreResponseModelMismatch       *bool                                     `json:"ignore_response_model_mismatch"`
 	ThinkingToContent                 *bool                                     `json:"thinking_to_content"`
 	SystemPrompt                      *string                                   `json:"system_prompt"`
@@ -999,6 +1000,7 @@ func (s *ChannelBatchSettingsRequest) toModelPatch() (*model.ChannelBatchSetting
 	patch := &model.ChannelBatchSettings{
 		ReasoningContentBackfill:          s.ReasoningContentBackfill,
 		ResponsesReasoningContentBackfill: s.ResponsesReasoningContentBackfill,
+		AssistantContentBackfill:          s.AssistantContentBackfill,
 		IgnoreResponseModelMismatch:       s.IgnoreResponseModelMismatch,
 		ThinkingToContent:                 s.ThinkingToContent,
 		SystemPrompt:                      s.SystemPrompt,
@@ -1006,6 +1008,7 @@ func (s *ChannelBatchSettingsRequest) toModelPatch() (*model.ChannelBatchSetting
 	}
 	hasValues := s.ReasoningContentBackfill != nil ||
 		s.ResponsesReasoningContentBackfill != nil ||
+		s.AssistantContentBackfill != nil ||
 		s.IgnoreResponseModelMismatch != nil ||
 		s.ThinkingToContent != nil ||
 		s.SystemPrompt != nil ||

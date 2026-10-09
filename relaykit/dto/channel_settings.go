@@ -28,6 +28,13 @@ type ChannelSettings struct {
 	// thinking-mode upstreams that reject history without it. Opt-in per channel
 	// and independent of ReasoningContentBackfill (which targets Chat messages).
 	ResponsesReasoningContentBackfill bool `json:"responses_reasoning_content_backfill,omitempty"`
+	// AssistantContentBackfill backfills a missing or null content on assistant
+	// messages that replay no tool call in a Chat Completions messages array
+	// before sending upstream, for upstreams that reject an assistant turn
+	// carrying neither content nor tool_calls. Opt-in per channel and
+	// independent of ReasoningContentBackfill (which targets assistant turns
+	// that do replay tool calls).
+	AssistantContentBackfill bool `json:"assistant_content_backfill,omitempty"`
 	// IgnoreResponseModelMismatch suppresses the "response model mismatch"
 	// warning when an upstream returns a model name different from the
 	// requested or upstream model (for example when the upstream model name is
