@@ -100,7 +100,7 @@ function ModeSelect(props: ModeSelectProps) {
 type BoolSettingRowProps = {
   id: string
   label: string
-  description: string
+  description?: string
   enabled: boolean
   onEnabledChange: (value: boolean) => void
   value: boolean
@@ -142,7 +142,9 @@ function BoolSettingRow(props: BoolSettingRowProps) {
           </SelectGroup>
         </SelectContent>
       </Select>
-      <p className='text-muted-foreground text-xs'>{props.description}</p>
+      {props.description ? (
+        <p className='text-muted-foreground text-xs'>{props.description}</p>
+      ) : null}
     </div>
   )
 }
@@ -444,39 +446,49 @@ export function ChannelAttributeFields(props: ChannelAttributeFieldsProps) {
           </p>
         </div>
 
-        <BoolSettingRow
-          id='reasoning-content-backfill'
-          label={t('Reasoning content backfill')}
-          description={t(
-            'Backfill missing reasoning_content on assistant tool-call messages in Chat Completions for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.'
-          )}
-          enabled={settings.reasoningContentBackfill.enabled}
-          onEnabledChange={(value) =>
-            setSetting('reasoningContentBackfill', { enabled: value })
-          }
-          value={settings.reasoningContentBackfill.value}
-          onValueChange={(value) =>
-            setSetting('reasoningContentBackfill', { value })
-          }
-          disabled={disabled}
-        />
+        {/* Reasoning content backfill: one feature shared by both protocols */}
+        <div className='space-y-3'>
+          <div className='space-y-1'>
+            <p className='text-sm font-medium'>
+              {t('Reasoning content backfill')}
+            </p>
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Backfill missing reasoning_content on replayed assistant turns for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled. Turn on each protocol it should apply to.'
+              )}
+            </p>
+          </div>
 
-        <BoolSettingRow
-          id='responses-reasoning-content-backfill'
-          label={t('Responses reasoning content backfill')}
-          description={t(
-            'Backfill missing reasoning_content on assistant items in a Responses input array for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.'
-          )}
-          enabled={settings.responsesReasoningContentBackfill.enabled}
-          onEnabledChange={(value) =>
-            setSetting('responsesReasoningContentBackfill', { enabled: value })
-          }
-          value={settings.responsesReasoningContentBackfill.value}
-          onValueChange={(value) =>
-            setSetting('responsesReasoningContentBackfill', { value })
-          }
-          disabled={disabled}
-        />
+          <BoolSettingRow
+            id='reasoning-content-backfill'
+            label={t('Chat Completions')}
+            enabled={settings.reasoningContentBackfill.enabled}
+            onEnabledChange={(value) =>
+              setSetting('reasoningContentBackfill', { enabled: value })
+            }
+            value={settings.reasoningContentBackfill.value}
+            onValueChange={(value) =>
+              setSetting('reasoningContentBackfill', { value })
+            }
+            disabled={disabled}
+          />
+
+          <BoolSettingRow
+            id='responses-reasoning-content-backfill'
+            label={t('Responses')}
+            enabled={settings.responsesReasoningContentBackfill.enabled}
+            onEnabledChange={(value) =>
+              setSetting('responsesReasoningContentBackfill', {
+                enabled: value,
+              })
+            }
+            value={settings.responsesReasoningContentBackfill.value}
+            onValueChange={(value) =>
+              setSetting('responsesReasoningContentBackfill', { value })
+            }
+            disabled={disabled}
+          />
+        </div>
 
         <BoolSettingRow
           id='assistant-content-backfill'

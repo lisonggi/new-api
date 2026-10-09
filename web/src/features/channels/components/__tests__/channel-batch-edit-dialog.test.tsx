@@ -126,9 +126,7 @@ test('a channel setting is sent inside settings, never as a column', async () =>
   const user = userEvent.setup()
   await openDialog([9])
 
-  await user.click(
-    screen.getByRole('switch', { name: 'Reasoning content backfill' })
-  )
+  await user.click(screen.getByRole('switch', { name: 'Chat Completions' }))
   await user.click(screen.getByRole('button', { name: 'Save Changes' }))
 
   await waitFor(() =>

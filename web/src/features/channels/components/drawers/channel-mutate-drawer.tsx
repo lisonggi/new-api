@@ -1930,55 +1930,48 @@ export function ChannelMutateDrawer({
   )
 
   const reasoningBackfillFields = (
-    <FormField
-      control={form.control}
-      name='reasoning_content_backfill'
-      render={({ field }) => (
-        <FormItem className='flex items-center justify-between px-4 py-3'>
-          <div className='space-y-0.5'>
-            <FormLabel>{t('Reasoning content backfill')}</FormLabel>
-            <FormDescription>
-              {t(
-                'Backfill missing reasoning_content on assistant tool-call messages for DeepSeek thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.'
-              )}
-            </FormDescription>
-          </div>
-          <FormControl>
-            <Switch
-              disabled={sensitiveLocked}
-              checked={field.value}
-              onCheckedChange={field.onChange}
-            />
-          </FormControl>
-        </FormItem>
-      )}
-    />
-  )
-
-  const responsesBackfillFields = (
-    <FormField
-      control={form.control}
-      name='responses_reasoning_content_backfill'
-      render={({ field }) => (
-        <FormItem className='flex items-center justify-between px-4 py-3'>
-          <div className='space-y-0.5'>
-            <FormLabel>{t('Responses reasoning content backfill')}</FormLabel>
-            <FormDescription>
-              {t(
-                'Backfill missing reasoning_content on assistant items in a Responses input array for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled.'
-              )}
-            </FormDescription>
-          </div>
-          <FormControl>
-            <Switch
-              disabled={sensitiveLocked}
-              checked={field.value}
-              onCheckedChange={field.onChange}
-            />
-          </FormControl>
-        </FormItem>
-      )}
-    />
+    <div className='space-y-3 px-4 py-3'>
+      <div className='space-y-0.5'>
+        <p className='text-sm font-medium'>{t('Reasoning content backfill')}</p>
+        <p className='text-muted-foreground text-xs'>
+          {t(
+            'Backfill missing reasoning_content on replayed assistant turns for thinking-mode upstreams. Fills only an empty string and is skipped when body passthrough is enabled. Turn on each protocol it should apply to.'
+          )}
+        </p>
+      </div>
+      <FormField
+        control={form.control}
+        name='reasoning_content_backfill'
+        render={({ field }) => (
+          <FormItem className='flex items-center justify-between'>
+            <FormLabel>{t('Chat Completions')}</FormLabel>
+            <FormControl>
+              <Switch
+                disabled={sensitiveLocked}
+                checked={field.value}
+                onCheckedChange={field.onChange}
+              />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={form.control}
+        name='responses_reasoning_content_backfill'
+        render={({ field }) => (
+          <FormItem className='flex items-center justify-between'>
+            <FormLabel>{t('Responses')}</FormLabel>
+            <FormControl>
+              <Switch
+                disabled={sensitiveLocked}
+                checked={field.value}
+                onCheckedChange={field.onChange}
+              />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+    </div>
   )
 
   const assistantContentBackfillFields = (
@@ -4807,7 +4800,6 @@ export function ChannelMutateDrawer({
                 {ollamaOpenAIChatFields}
                 {thinkingFields}
                 {reasoningBackfillFields}
-                {responsesBackfillFields}
                 {assistantContentBackfillFields}
                 {ignoreResponseModelMismatchFields}
                 {currentType !== CHANNEL_TYPE_ADVANCED_CUSTOM &&

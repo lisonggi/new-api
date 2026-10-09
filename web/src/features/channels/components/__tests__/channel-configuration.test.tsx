@@ -1514,7 +1514,7 @@ test('reasoning content backfill renders disabled by default and saves the toggl
   await screen.findByDisplayValue('Existing channel')
   await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
   const toggle = screen.getByRole('switch', {
-    name: 'Reasoning content backfill',
+    name: 'Chat Completions',
   })
   expect(toggle).not.toBeChecked()
   await user.click(toggle)
@@ -1538,7 +1538,7 @@ test('reasoning content backfill is checked on reopen and saves disabling it', a
   await screen.findByDisplayValue('Existing channel')
   await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
   const toggle = screen.getByRole('switch', {
-    name: 'Reasoning content backfill',
+    name: 'Chat Completions',
   })
   expect(toggle).toBeChecked()
   await user.click(toggle)
@@ -1558,7 +1558,7 @@ test('responses reasoning content backfill renders disabled by default and saves
   await screen.findByDisplayValue('Existing channel')
   await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
   const toggle = screen.getByRole('switch', {
-    name: 'Responses reasoning content backfill',
+    name: 'Responses',
   })
   expect(toggle).not.toBeChecked()
   await user.click(toggle)
@@ -1592,7 +1592,7 @@ test('reasoning content backfill is disabled without sensitive write permission'
   await screen.findByDisplayValue('Existing channel')
   await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
   const toggle = screen.getByRole('switch', {
-    name: 'Reasoning content backfill',
+    name: 'Chat Completions',
   })
   expect(toggle).toHaveAttribute('aria-disabled', 'true')
   await user.click(toggle)
