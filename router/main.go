@@ -30,6 +30,7 @@ func SetRouter(router *gin.Engine) {
 		pluginDispatcher,
 		middleware.RouteTag("web"),
 		middleware.AccessTokenAudit(),
+		middleware.GlobalWebRateLimit(),
 		func(c *gin.Context) {
 			if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
 				controller.RelayNotFound(c)
@@ -39,7 +40,7 @@ func SetRouter(router *gin.Engine) {
 				c.Redirect(http.StatusMovedPermanently, fmt.Sprintf("%s%s", frontendBaseUrl, c.Request.RequestURI))
 				return
 			}
-			c.Status(http.StatusNotFound)
+			c.AbortWithStatus(http.StatusNotFound)
 		},
 	)
 }

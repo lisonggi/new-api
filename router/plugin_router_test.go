@@ -859,6 +859,41 @@ func performPluginRequest(handler http.Handler, method, path string) *httptest.R
 	return recorder
 }
 
+func TestSetRouterServesOnlyAPIRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("unknown API and asset paths answer like an unknown API route", func(t *testing.T) {
+		outer := gin.New()
+		SetRouter(outer)
+		for _, path := range []string{"/api/definitely-missing", "/v1/missing", "/assets/missing.js"} {
+			t.Run(path, func(t *testing.T) {
+				response := performPluginRequest(outer, http.MethodGet, path)
+				require.Equal(t, http.StatusNotFound, response.Code)
+				assert.Contains(t, response.Body.String(), "Invalid URL")
+				assert.Contains(t, response.Header().Get("Cache-Control"), "no-store")
+			})
+		}
+	})
+
+	t.Run("non-API paths are not served as the dashboard", func(t *testing.T) {
+		outer := gin.New()
+		SetRouter(outer)
+		response := performPluginRequest(outer, http.MethodGet, "/security")
+		require.Equal(t, http.StatusNotFound, response.Code)
+		assert.Empty(t, response.Body.String())
+		assert.Empty(t, response.Header().Get("Cache-Control"))
+	})
+
+	t.Run("non-API paths redirect to FRONTEND_BASE_URL when configured", func(t *testing.T) {
+		t.Setenv("FRONTEND_BASE_URL", "https://frontend.example/")
+		outer := gin.New()
+		SetRouter(outer)
+		response := performPluginRequest(outer, http.MethodGet, "/security?tab=1")
+		require.Equal(t, http.StatusMovedPermanently, response.Code)
+		assert.Equal(t, "https://frontend.example/security?tab=1", response.Header().Get("Location"))
+	})
+}
+
 func TestSecurityRoutesDisableCachingBeforeAuthentication(t *testing.T) {
 	outer := gin.New()
 	SetApiRouter(outer)

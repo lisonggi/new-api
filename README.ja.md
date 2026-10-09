@@ -240,7 +240,7 @@ docker compose logs -f new-api
 
 バックエンドは Go と Gin、管理画面は React 19、TypeScript、Rsbuild、TanStack、Tailwind CSS 4 を使用します。フロントエンドの依存関係とスクリプトには Bun を使います。Go 言語の基準バージョンは [go.mod](./go.mod)、コンテナのビルドツールチェーンは [Dockerfile](./Dockerfile) を参照してください。
 
-バックエンドは `web/dist` を埋め込むため、先にフロントエンドをビルドします。
+バックエンドはフロントエンドを埋め込まず、配信もしません。デプロイ用にフロントエンドを別途ビルドします。
 
 ```bash
 # リポジトリのルート

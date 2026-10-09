@@ -244,7 +244,7 @@ Pin an image version from [Releases](https://github.com/QuantumNous/new-api/rele
 
 The backend uses Go and Gin. The web console uses React 19, TypeScript, Rsbuild, TanStack, and Tailwind CSS 4. Use Bun for frontend dependencies and scripts; see [go.mod](./go.mod) for the Go language baseline and [Dockerfile](./Dockerfile) for the container build toolchain.
 
-Build the frontend before starting the backend, which embeds `web/dist`:
+The backend is API-only and does not embed or serve the frontend; build the frontend separately when you need to deploy it:
 
 ```bash
 # Repository root

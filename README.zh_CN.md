@@ -240,7 +240,7 @@ docker compose logs -f new-api
 
 后端使用 Go 和 Gin；控制台使用 React 19、TypeScript、Rsbuild、TanStack 与 Tailwind CSS 4。前端依赖和脚本使用 Bun；Go 语言基线见 [go.mod](./go.mod)，容器构建工具链见 [Dockerfile](./Dockerfile)。
 
-后端会嵌入 `web/dist`，首次启动前先构建前端：
+后端已与前端分离，不再嵌入或服务前端；需要部署时单独构建前端：
 
 ```bash
 # 仓库根目录

@@ -240,7 +240,7 @@ Choisissez une version précise d'image dans les [versions publiées](https://gi
 
 Le backend utilise Go et Gin ; la console utilise React 19, TypeScript, Rsbuild, TanStack et Tailwind CSS 4. Utilisez Bun pour le frontend. Consultez [go.mod](./go.mod) pour la version de référence du langage Go et [Dockerfile](./Dockerfile) pour la chaîne de compilation du conteneur.
 
-Compilez le frontend avant de démarrer le backend, qui intègre `web/dist` :
+Le backend est désormais découplé du frontend et ne l'intègre plus ; compilez le frontend séparément pour le déployer :
 
 ```bash
 # Racine du dépôt
