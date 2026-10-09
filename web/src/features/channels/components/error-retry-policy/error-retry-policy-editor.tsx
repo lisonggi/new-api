@@ -169,7 +169,7 @@ export function ErrorRetryPolicyEditor(props: EditorProps) {
 
       <RuleListTable
         ariaLabel={t('Error retry rules table')}
-        tableClassName='min-w-[760px] [&_th]:px-4 [&_th]:text-muted-foreground [&_td]:px-4 [&_td]:py-4'
+        tableClassName='min-w-[560px] table-fixed [&_th]:px-4 [&_th]:text-muted-foreground [&_td]:px-4 [&_td]:py-4'
         rules={rules}
         getRowKey={(rule) => rule.id}
         disabled={props.disabled}
