@@ -47,10 +47,8 @@ import { useUpdateOption } from '../hooks/use-update-option'
 import { isValidTaskPublicAddress } from './task-public-address'
 
 const _systemInfoSchema = z.object({
-  SystemName: z.string().min(1),
   ServerAddress: z.string().optional(),
   TaskPublicAddress: z.string().refine(isValidTaskPublicAddress),
-  Logo: z.string().url().optional().or(z.literal('')),
   Footer: z.string().optional(),
   About: z.string().optional(),
   HomePageContent: z.string().optional(),
@@ -79,10 +77,8 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
   const updateOption = useUpdateOption()
 
   const normalizedDefaults: SystemInfoFormValues = {
-    SystemName: normalizeValue(defaultValues.SystemName),
     ServerAddress: normalizeValue(defaultValues.ServerAddress),
     TaskPublicAddress: normalizeValue(defaultValues.TaskPublicAddress),
-    Logo: normalizeValue(defaultValues.Logo),
     Footer: normalizeValue(defaultValues.Footer),
     About: normalizeValue(defaultValues.About),
     HomePageContent: normalizeValue(defaultValues.HomePageContent),
@@ -96,9 +92,6 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
   }
 
   const systemInfoSchemaWithI18n = z.object({
-    SystemName: z.string().min(1, {
-      error: () => t('System name is required'),
-    }),
     ServerAddress: z.string().optional(),
     TaskPublicAddress: z.string().refine(isValidTaskPublicAddress, {
       error: () =>
@@ -106,7 +99,6 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
           'Enter an absolute HTTP(S) URL without credentials, query parameters, or fragments'
         ),
     }),
-    Logo: z.string().url().optional().or(z.literal('')),
     Footer: z.string().optional(),
     About: z.string().optional(),
     HomePageContent: z.string().optional(),
@@ -158,23 +150,6 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
             <SettingsFormGrid>
               <FormField
                 control={form.control}
-                name='SystemName'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('System Name')}</FormLabel>
-                    <FormControl>
-                      <Input placeholder={t('New API')} {...field} />
-                    </FormControl>
-                    <FormDescription>
-                      {t('The name displayed across the application')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
                 name='ServerAddress'
                 render={({ field }) => (
                   <FormItem>
@@ -208,26 +183,6 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
                       {t(
                         'Public base URL for async task media. Supports a dedicated media domain, port, or Nginx path prefix; falls back to Server Address when empty.'
                       )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='Logo'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Logo URL')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder={t('https://example.com/logo.png')}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t('URL to your logo image (optional)')}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

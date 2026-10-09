@@ -142,8 +142,6 @@ export type SystemTaskFilters = {
 
 export type SiteSettings = {
   Notice: string
-  SystemName: string
-  Logo: string
   Footer: string
   About: string
   HomePageContent: string

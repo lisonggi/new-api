@@ -95,6 +95,12 @@ export const useSystemConfigStore = create<SystemConfigState>()(
     }),
     {
       name: 'system-config-storage',
+      // Branding is fixed at build time. Overwrite any stale value persisted by
+      // an older session so the header and favicon never flash a previous name
+      // or logo before `/api/status` refreshes the store.
+      onRehydrateStorage: () => (state) => {
+        state?.setConfig({ systemName: DEFAULT_SYSTEM_NAME, logo: DEFAULT_LOGO })
+      },
       partialize: (state) => ({
         config: state.config,
         loadedLogoUrl: state.loadedLogoUrl,

@@ -648,14 +648,15 @@ func parseCacheReadTokens(other string) int64 {
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
-	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
+	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota, COALESCE(sum(prompt_tokens), 0) prompt_tokens")
 
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
 
 	// 缓存命中率与 quota 使用相同的过滤范围；缓存命中数记录在 other JSON 中，
-	// 在应用层聚合，避免为各数据库编写方言相关的 JSON 提取 SQL
-	cacheQuery := LOG_DB.Table("logs").Select("prompt_tokens, other")
+	// 跨库没有统一的 JSON 提取语法，因此仍在应用层解析，但改为流式读取，
+	// 避免把区间内所有行一次性载入内存。
+	cacheQuery := LOG_DB.Table("logs").Select("other")
 
 	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
 		return stat, err
@@ -722,17 +723,23 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	stat.Rpm = rateStat.Rpm
 	stat.Tpm = rateStat.Tpm
 
-	var cacheRows []struct {
-		PromptTokens int64
-		Other        string
-	}
-	if err := cacheQuery.Scan(&cacheRows).Error; err != nil {
+	rows, err := cacheQuery.Rows()
+	if err != nil {
 		common.SysError("failed to query cache stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
-	for _, row := range cacheRows {
-		stat.PromptTokens += row.PromptTokens
-		stat.CacheTokens += parseCacheReadTokens(row.Other)
+	defer rows.Close()
+	for rows.Next() {
+		var other string
+		if err := rows.Scan(&other); err != nil {
+			common.SysError("failed to scan cache stat: " + err.Error())
+			return stat, errors.New("查询统计数据失败")
+		}
+		stat.CacheTokens += parseCacheReadTokens(other)
+	}
+	if err := rows.Err(); err != nil {
+		common.SysError("failed to iterate cache stat: " + err.Error())
+		return stat, errors.New("查询统计数据失败")
 	}
 
 	return stat, nil
