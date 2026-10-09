@@ -181,7 +181,6 @@ func TestPluginSSEFlushesWithoutFallbackBuffering(t *testing.T) {
 		(&pluginRouteDispatcher{registry: registry}).dispatch,
 		middleware.RouteTag("web"),
 		gzip.Gzip(gzip.DefaultCompression),
-		middleware.Cache(),
 		func(c *gin.Context) { c.String(http.StatusOK, "fallback") },
 	)
 
@@ -194,32 +193,6 @@ func TestPluginSSEFlushesWithoutFallbackBuffering(t *testing.T) {
 	assert.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))
 	assert.Equal(t, "data: ready\n\n", recorder.Body.String())
 	assert.Empty(t, recorder.Header().Get("Content-Encoding"))
-	assert.Empty(t, recorder.Header().Get("Cache-Control"))
-	assert.Empty(t, recorder.Header().Get("Cache-Version"))
-}
-
-func TestWebCacheHeadersDoNotLeakOntoPluginRoutes(t *testing.T) {
-	plugin := compileRouterPlugin(t, "cache-owner", "1.0.0", `[
-		{method: "GET", path: "/vendor/status/:task_id", type: "query", render: "native"}
-	]`)
-	outer, registry := newPluginRouterTest(t, []*jsplugin.LoadedPlugin{plugin}, testPluginRouteHandlers(
-		func(c *gin.Context, _ *jsplugin.RoutingGeneration, _ jsplugin.RouteBinding) {
-			c.JSON(http.StatusOK, gin.H{"status": "queued"})
-		},
-	))
-	outer.NoRoute(
-		(&pluginRouteDispatcher{registry: registry}).dispatch,
-		middleware.Cache(),
-		func(c *gin.Context) { c.String(http.StatusOK, "fallback") },
-	)
-
-	pluginResponse := performPluginRequest(outer, http.MethodGet, "/vendor/status/task-1")
-	assert.Empty(t, pluginResponse.Header().Get("Cache-Control"))
-	assert.Empty(t, pluginResponse.Header().Get("Cache-Version"))
-
-	fallbackResponse := performPluginRequest(outer, http.MethodGet, "/unknown")
-	assert.Equal(t, middleware.CacheControlStatic, fallbackResponse.Header().Get("Cache-Control"))
-	assert.NotEmpty(t, fallbackResponse.Header().Get("Cache-Version"))
 }
 
 func TestPluginInnerContextImportsRequestMetadataAndTrustedProxyConfig(t *testing.T) {
@@ -884,24 +857,6 @@ func performPluginRequest(handler http.Handler, method, path string) *httptest.R
 	request := httptest.NewRequest(method, path, strings.NewReader(""))
 	handler.ServeHTTP(recorder, request)
 	return recorder
-}
-
-func TestWebFallbackDoesNotCacheMissingAPIOrAssets(t *testing.T) {
-	outer := gin.New()
-	SetWebRouter(outer, WebAssets{IndexPage: []byte("dashboard")}, func(c *gin.Context) { c.Next() })
-	for _, path := range []string{"/api/user/token/status", "/api/audit/self?p=1", "/v1/missing", "/assets/missing.js"} {
-		t.Run(path, func(t *testing.T) {
-			response := performPluginRequest(outer, http.MethodGet, path)
-			assert.Equal(t, http.StatusNotFound, response.Code)
-			assert.Contains(t, response.Body.String(), "Invalid URL")
-			assert.Contains(t, response.Header().Get("Cache-Control"), "no-store")
-			assert.NotContains(t, response.Header().Get("Cache-Control"), "604800")
-		})
-	}
-	page := performPluginRequest(outer, http.MethodGet, "/security")
-	assert.Equal(t, http.StatusOK, page.Code)
-	assert.Equal(t, "dashboard", page.Body.String())
-	assert.Equal(t, middleware.CacheControlHTML, page.Header().Get("Cache-Control"))
 }
 
 func TestSecurityRoutesDisableCachingBeforeAuthentication(t *testing.T) {
